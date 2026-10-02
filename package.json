@@ -8,7 +8,8 @@
     "check": "pnpm typecheck && pnpm test",
     "check:evidence": "node scripts/check-evidence.ts",
     "test": "vitest run",
-    "start": "node src/server.ts"
+    "start": "node src/server.ts",
+    "dev": "DB_PATH=.data/garden.db node src/server.ts"
   },
   "devDependencies": {
     "@types/jsdom": "^30.0.0",

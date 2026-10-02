@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { GRID_SIZE, derivePlot, emptyPlot } from "./garden.ts";
+import * as db from "./db.ts";
+import { derivePlot } from "./garden.ts";
 import { getOrSetIdentity } from "./identity.ts";
 import { renderPage } from "./page.ts";
 import { renderReadme } from "./readme.ts";
@@ -7,18 +8,9 @@ import { broadcastUpdate, subscribe } from "./realtime.ts";
 import { serveStatic } from "./static.ts";
 import type { Plot } from "./types.ts";
 
-// Milestone-1 scaffolding: an in-memory store standing in for the database.
-// Replaced by src/db.ts (SQLite on the Fly volume) in the persistence step —
-// nothing here should be relied on surviving a process restart yet.
-const plots: Plot[] = Array.from({ length: GRID_SIZE }, (_, i) => emptyPlot(i));
-
 function derivedPlots(): Plot[] {
   const now = Date.now();
-  return plots.map((plot) => derivePlot(plot, now));
-}
-
-function findPlot(position: number): Plot | undefined {
-  return plots.find((plot) => plot.position === position);
+  return db.listPlots().map((plot) => derivePlot(plot, now));
 }
 
 // Each returns the plot's new derived state on success, or null on a
@@ -26,41 +18,31 @@ function findPlot(position: number): Plot | undefined {
 // relying on the POST response, so every connected tab (including the
 // caller's own) updates through exactly one code path.
 function handlePlant(position: number, actorId: string): Plot | null {
-  const plot = findPlot(position);
+  const plot = db.getPlot(position);
   if (!plot) return null;
   if (derivePlot(plot, Date.now()).state !== "empty") return null;
 
-  const now = Date.now();
-  plot.state = "planted";
-  plot.plantedAt = now;
-  plot.plantedBy = actorId;
-  plot.lastWateredAt = now;
-  plot.lastWateredBy = actorId;
-  return derivePlot(plot, Date.now());
+  const updated = db.plant(position, actorId);
+  return updated ? derivePlot(updated, Date.now()) : null;
 }
 
 function handleWater(position: number, actorId: string): Plot | null {
-  const plot = findPlot(position);
+  const plot = db.getPlot(position);
   if (!plot) return null;
   const derived = derivePlot(plot, Date.now());
   if (derived.state === "empty" || derived.state === "wilted") return null;
 
-  plot.lastWateredAt = Date.now();
-  plot.lastWateredBy = actorId;
-  return derivePlot(plot, Date.now());
+  const updated = db.water(position, actorId);
+  return updated ? derivePlot(updated, Date.now()) : null;
 }
 
 function handleCompost(position: number): Plot | null {
-  const plot = findPlot(position);
+  const plot = db.getPlot(position);
   if (!plot) return null;
   if (derivePlot(plot, Date.now()).state !== "wilted") return null;
 
-  plot.state = "empty";
-  plot.plantedAt = null;
-  plot.plantedBy = null;
-  plot.lastWateredAt = null;
-  plot.lastWateredBy = null;
-  return derivePlot(plot, Date.now());
+  const updated = db.compost(position);
+  return updated ? derivePlot(updated, Date.now()) : null;
 }
 
 const ACTION_PATTERN = /^\/api\/plots\/(\d+)\/(plant|water|compost)$/;

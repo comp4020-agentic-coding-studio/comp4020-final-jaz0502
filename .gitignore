@@ -2,6 +2,10 @@ node_modules/
 dist/
 *.log
 
+# local SQLite data when DB_PATH points here for dev (the real data lives on
+# the Fly volume at /data in production)
+.data/
+
 # editor and OS junk
 .DS_Store
 ._*
