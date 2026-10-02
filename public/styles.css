@@ -30,6 +30,12 @@ body {
 
 .plot__label {
   font-size: 0.8rem;
+  margin-bottom: 0.2rem;
+}
+
+.plot__watered {
+  font-size: 0.7rem;
+  color: #4b5e45;
   margin-bottom: 0.4rem;
 }
 

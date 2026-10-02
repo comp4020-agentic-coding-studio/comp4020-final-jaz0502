@@ -14,12 +14,30 @@ function actionFor(state: PlotState): { action: string; label: string } {
   return { action: "water", label: "Water" };
 }
 
+// Visible feedback for watering: it doesn't change the stage label by
+// itself (it only resets the wilt clock), so without this a click looked
+// like it did nothing.
+function formatAgo(timestampMs: number, now: number): string {
+  const diffMs = now - timestampMs;
+  if (diffMs < 60_000) return "just now";
+  const minutes = Math.floor(diffMs / 60_000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 // Kept in sync with public/app.js's renderCell: the server renders the
 // initial page, the client re-renders the same markup after each SSE event.
 function plotCell(plot: Plot): string {
   const { action, label } = actionFor(plot.state);
+  const watered =
+    plot.lastWateredAt === null
+      ? ""
+      : `<div class="plot__watered">Watered ${formatAgo(plot.lastWateredAt, Date.now())}</div>`;
   return `<div class="plot plot--${plot.state}" id="plot-${plot.position}">
   <div class="plot__label">${STAGE_LABEL[plot.state]}</div>
+  ${watered}
   <button type="button" data-position="${plot.position}" data-action="${action}">${label}</button>
 </div>`;
 }

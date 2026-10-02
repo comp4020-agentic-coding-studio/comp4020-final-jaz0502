@@ -12,11 +12,26 @@ function actionFor(state) {
   return { action: "water", label: "Water" };
 }
 
+function formatAgo(timestampMs, now) {
+  const diffMs = now - timestampMs;
+  if (diffMs < 60_000) return "just now";
+  const minutes = Math.floor(diffMs / 60_000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 // Mirrors src/page.ts's plotCell markup: the server renders the first
 // paint, this re-renders the same shape after every SSE event.
 function renderCellBody(plot) {
   const { action, label } = actionFor(plot.state);
+  const watered =
+    plot.lastWateredAt === null
+      ? ""
+      : `<div class="plot__watered">Watered ${formatAgo(plot.lastWateredAt, Date.now())}</div>`;
   return `<div class="plot__label">${STAGE_LABEL[plot.state]}</div>
+${watered}
 <button type="button" data-position="${plot.position}" data-action="${action}">${label}</button>`;
 }
 
