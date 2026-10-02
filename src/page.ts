@@ -8,21 +8,19 @@ const STAGE_LABEL: Record<PlotState, string> = {
   wilted: "Wilted — needs composting",
 };
 
-function actionForm(position: number, action: string, label: string): string {
-  return `<form method="post" action="/api/plots/${position}/${action}"><button type="submit">${label}</button></form>`;
+function actionFor(state: PlotState): { action: string; label: string } {
+  if (state === "empty") return { action: "plant", label: "Plant" };
+  if (state === "wilted") return { action: "compost", label: "Compost" };
+  return { action: "water", label: "Water" };
 }
 
+// Kept in sync with public/app.js's renderCell: the server renders the
+// initial page, the client re-renders the same markup after each SSE event.
 function plotCell(plot: Plot): string {
-  const action =
-    plot.state === "empty"
-      ? actionForm(plot.position, "plant", "Plant")
-      : plot.state === "wilted"
-        ? actionForm(plot.position, "compost", "Compost")
-        : actionForm(plot.position, "water", "Water");
-
-  return `<div class="plot plot--${plot.state}">
+  const { action, label } = actionFor(plot.state);
+  return `<div class="plot plot--${plot.state}" id="plot-${plot.position}">
   <div class="plot__label">${STAGE_LABEL[plot.state]}</div>
-  ${action}
+  <button type="button" data-position="${plot.position}" data-action="${action}">${label}</button>
 </div>`;
 }
 
@@ -39,10 +37,11 @@ export function renderPage(plots: Plot[]): string {
 <body>
   <h1>Community Garden</h1>
   <p>A shared, cooperative garden bed. Anyone can plant an empty plot, and anyone can water any growing plot &mdash; there's no ownership here.</p>
-  <div class="grid">
-    ${cells}
+  <div class="grid" id="grid">
+${cells}
   </div>
   <p><a href="/readme/">About this app</a></p>
+  <script src="/app.js" defer></script>
 </body>
 </html>`;
 }
