@@ -8,7 +8,7 @@ import { broadcastUpdate, subscribe } from "./realtime.ts";
 import { serveStatic } from "./static.ts";
 import type { Plot } from "./types.ts";
 
-function derivedPlots(): Plot[] {
+export function derivedPlots(): Plot[] {
   const now = Date.now();
   return db.listPlots().map((plot) => derivePlot(plot, now));
 }
