@@ -54,7 +54,7 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
 
   if (req.method === "GET" && pathname === "/") {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    res.end(renderPage(derivedPlots()));
+    res.end(renderPage());
     return;
   }
 
@@ -71,6 +71,23 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
 
   if (req.method === "GET" && pathname === "/app.js") {
     await serveStatic(res, "app.js", "application/javascript; charset=utf-8");
+    return;
+  }
+
+  if (req.method === "GET" && pathname === "/vendor/three/three.module.js") {
+    await serveStatic(res, "vendor/three/three.module.js", "application/javascript; charset=utf-8");
+    return;
+  }
+
+  // three.module.js imports everything from this sibling file in recent
+  // Three.js builds.
+  if (req.method === "GET" && pathname === "/vendor/three/three.core.js") {
+    await serveStatic(res, "vendor/three/three.core.js", "application/javascript; charset=utf-8");
+    return;
+  }
+
+  if (req.method === "GET" && pathname === "/vendor/three/controls/OrbitControls.js") {
+    await serveStatic(res, "vendor/three/controls/OrbitControls.js", "application/javascript; charset=utf-8");
     return;
   }
 

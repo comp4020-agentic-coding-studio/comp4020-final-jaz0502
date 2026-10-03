@@ -1,3 +1,13 @@
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+const GRID_SIZE = 25;
+const COLS = 5;
+const TILE_SIZE = 0.9;
+const TILE_HEIGHT = 0.15;
+const SPACING = 1.0;
+const WATER_DURATION_MS = 900;
+
 const STAGE_LABEL = {
   empty: "Empty plot",
   planted: "Just planted",
@@ -6,11 +16,19 @@ const STAGE_LABEL = {
   wilted: "Wilted — needs composting",
 };
 
-function actionFor(state) {
-  if (state === "empty") return { action: "plant", label: "Plant" };
-  if (state === "wilted") return { action: "compost", label: "Compost" };
-  return { action: "water", label: "Water" };
-}
+const PALETTE = {
+  soilDry: 0xc9a876,
+  soilRich: 0x6b4a34,
+  soilWilted: 0x9c8769,
+  seed: 0x3f7d32,
+  stemSprout: 0x6a9b46,
+  foliageSprout: 0x8fc45f,
+  trunk: 0x6b4423,
+  foliageMature: 0x5a9c48,
+  fruit: 0xdd6b55,
+  wiltedWood: 0x8a6b4f,
+  wiltedFoliage: 0xab8f66,
+};
 
 function formatAgo(timestampMs, now) {
   const diffMs = now - timestampMs;
@@ -22,24 +40,248 @@ function formatAgo(timestampMs, now) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-// Mirrors src/page.ts's plotCell markup: the server renders the first
-// paint, this re-renders the same shape after every SSE event.
-function renderCellBody(plot) {
-  const { action, label } = actionFor(plot.state);
-  const watered =
-    plot.lastWateredAt === null
-      ? ""
-      : `<div class="plot__watered">Watered ${formatAgo(plot.lastWateredAt, Date.now())}</div>`;
-  return `<div class="plot__label">${STAGE_LABEL[plot.state]}</div>
-${watered}
-<button type="button" data-position="${plot.position}" data-action="${action}">${label}</button>`;
+function actionFor(state) {
+  if (state === "empty") return "plant";
+  if (state === "wilted") return "compost";
+  return "water";
+}
+
+function worldPosition(position) {
+  const row = Math.floor(position / COLS);
+  const col = position % COLS;
+  return { x: (col - 2) * SPACING, z: (row - 2) * SPACING };
+}
+
+function soilColorFor(state) {
+  if (state === "empty") return PALETTE.soilDry;
+  if (state === "wilted") return PALETTE.soilWilted;
+  return PALETTE.soilRich;
+}
+
+function disposeGroup(group) {
+  group.traverse((obj) => {
+    if (obj.geometry) obj.geometry.dispose();
+    if (obj.material) {
+      const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const material of materials) material.dispose();
+    }
+  });
+}
+
+function flatMaterial(color) {
+  return new THREE.MeshStandardMaterial({ color, flatShading: true });
+}
+
+// All plant shapes are procedural primitives — no model assets. Each
+// returns a fresh group local to the plot's soil-top origin (y = 0).
+function buildPlant(state) {
+  const group = new THREE.Group();
+
+  if (state === "empty") {
+    return group;
+  }
+
+  if (state === "planted") {
+    for (let i = 0; i < 3; i++) {
+      const seed = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 4), flatMaterial(PALETTE.seed));
+      seed.position.set((i - 1) * 0.08, 0.05, (i % 2) * 0.05);
+      group.add(seed);
+    }
+    return group;
+  }
+
+  if (state === "sprout") {
+    const stem = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.02, 0.02, 0.25, 6),
+      flatMaterial(PALETTE.stemSprout),
+    );
+    stem.position.y = 0.12;
+    group.add(stem);
+
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.2, 6), flatMaterial(PALETTE.foliageSprout));
+    tip.position.y = 0.3;
+    group.add(tip);
+    return group;
+  }
+
+  if (state === "mature") {
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.08, 0.35, 7),
+      flatMaterial(PALETTE.trunk),
+    );
+    trunk.position.y = 0.17;
+    group.add(trunk);
+
+    const foliage = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.5, 7), flatMaterial(PALETTE.foliageMature));
+    foliage.position.y = 0.55;
+    group.add(foliage);
+
+    for (let i = 0; i < 3; i++) {
+      const angle = (i / 3) * Math.PI * 2;
+      const fruit = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 4), flatMaterial(PALETTE.fruit));
+      fruit.position.set(Math.cos(angle) * 0.2, 0.45, Math.sin(angle) * 0.2);
+      group.add(fruit);
+    }
+    return group;
+  }
+
+  // wilted: a collapsed, drooping version of the mature shape.
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.35, 7), flatMaterial(PALETTE.wiltedWood));
+  trunk.position.y = 0.17;
+  group.add(trunk);
+
+  const foliage = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.5, 7), flatMaterial(PALETTE.wiltedFoliage));
+  foliage.position.y = 0.45;
+  foliage.scale.y = 0.5;
+  group.add(foliage);
+
+  group.scale.setScalar(0.7);
+  group.rotation.z = 0.4;
+  return group;
+}
+
+const container = document.getElementById("scene-container");
+const statusBar = document.getElementById("status-bar");
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xbfe3f0);
+
+const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
+camera.position.set(6, 6, 6);
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.setSize(container.clientWidth, container.clientHeight);
+container.appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+const sun = new THREE.DirectionalLight(0xfff4e0, 0.8);
+sun.position.set(5, 10, 7.5);
+scene.add(sun);
+
+const bedBase = new THREE.Mesh(
+  new THREE.BoxGeometry(COLS * SPACING + 0.6, 0.3, COLS * SPACING + 0.6),
+  flatMaterial(0x7a5a3a),
+);
+bedBase.position.y = -0.3;
+scene.add(bedBase);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0, 0);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 4;
+controls.maxDistance = 14;
+controls.maxPolarAngle = Math.PI / 2 - 0.05;
+
+function onResize() {
+  const width = container.clientWidth;
+  const height = container.clientHeight;
+  camera.aspect = width / height;
+  camera.updateProjectionMatrix();
+  renderer.setSize(width, height);
+}
+window.addEventListener("resize", onResize);
+onResize();
+
+// position -> { group, soilMesh, plantGroup, baseSoilColor }
+const sceneObjects = new Map();
+// position -> latest Plot from the server (SSE only)
+const plots = new Map();
+
+for (let position = 0; position < GRID_SIZE; position++) {
+  const { x, z } = worldPosition(position);
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+
+  const soilMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(TILE_SIZE, TILE_HEIGHT, TILE_SIZE),
+    flatMaterial(soilColorFor("empty")),
+  );
+  soilMesh.position.y = -TILE_HEIGHT / 2;
+  soilMesh.userData.position = position;
+  group.add(soilMesh);
+
+  const plantGroup = buildPlant("empty");
+  group.add(plantGroup);
+
+  scene.add(group);
+  sceneObjects.set(position, {
+    group,
+    soilMesh,
+    plantGroup,
+    baseSoilColor: new THREE.Color(soilColorFor("empty")),
+  });
+}
+
+const soilMeshes = [...sceneObjects.values()].map((obj) => obj.soilMesh);
+
+function rebuildPlant(position, state) {
+  const obj = sceneObjects.get(position);
+  disposeGroup(obj.plantGroup);
+  obj.group.remove(obj.plantGroup);
+  obj.plantGroup = buildPlant(state);
+  obj.group.add(obj.plantGroup);
+  obj.baseSoilColor = new THREE.Color(soilColorFor(state));
+  obj.soilMesh.material.color.copy(obj.baseSoilColor);
+}
+
+const waterAnimations = new Map();
+
+function triggerWaterEffect(position) {
+  waterAnimations.set(position, { start: performance.now() });
+}
+
+function tickAnimations(now) {
+  for (const [position, anim] of waterAnimations) {
+    const t = Math.min((now - anim.start) / WATER_DURATION_MS, 1);
+    const obj = sceneObjects.get(position);
+    const wet = obj.baseSoilColor.clone().multiplyScalar(0.55);
+    obj.soilMesh.material.color.copy(wet).lerp(obj.baseSoilColor, t);
+    const bump = 1 + 0.12 * Math.sin(t * Math.PI);
+    obj.plantGroup.scale.setScalar(bump);
+    if (t >= 1) {
+      obj.soilMesh.material.color.copy(obj.baseSoilColor);
+      obj.plantGroup.scale.setScalar(1);
+      waterAnimations.delete(position);
+    }
+  }
+}
+
+let hoveredPosition = null;
+let messageTimer = null;
+
+function refreshStatusBarForHover(plot) {
+  if (!plot) return;
+  const watered = plot.lastWateredAt === null ? "" : ` — watered ${formatAgo(plot.lastWateredAt, Date.now())}`;
+  statusBar.textContent = `${STAGE_LABEL[plot.state]}${watered}`;
+}
+
+function clearStatusBarHover() {
+  statusBar.textContent = "Hover a plot to see its status. Click to act.";
+}
+
+function showStatusMessage(text) {
+  clearTimeout(messageTimer);
+  statusBar.textContent = text;
+  messageTimer = setTimeout(() => {
+    if (hoveredPosition !== null) refreshStatusBarForHover(plots.get(hoveredPosition));
+    else clearStatusBarHover();
+  }, 4000);
 }
 
 function applyPlot(plot) {
-  const el = document.getElementById(`plot-${plot.position}`);
-  if (!el) return;
-  el.className = `plot plot--${plot.state}`;
-  el.innerHTML = renderCellBody(plot);
+  const prev = plots.get(plot.position);
+  const stateChanged = !prev || prev.state !== plot.state;
+  const wateredChanged =
+    Boolean(prev) && plot.lastWateredAt !== null && (prev.lastWateredAt === null || plot.lastWateredAt > prev.lastWateredAt);
+
+  plots.set(plot.position, plot);
+  if (stateChanged) rebuildPlant(plot.position, plot.state);
+  if (wateredChanged) triggerWaterEffect(plot.position);
+  if (hoveredPosition === plot.position) refreshStatusBarForHover(plot);
 }
 
 function connect() {
@@ -51,26 +293,75 @@ function connect() {
     applyPlot(JSON.parse(event.data));
   });
 }
+connect();
 
-const grid = document.getElementById("grid");
-grid.addEventListener("click", async (event) => {
-  const button = event.target.closest("button[data-action]");
-  if (!button) return;
+const raycaster = new THREE.Raycaster();
 
-  button.disabled = true;
+function ndcFromEvent(event) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  return new THREE.Vector2(
+    ((event.clientX - rect.left) / rect.width) * 2 - 1,
+    -((event.clientY - rect.top) / rect.height) * 2 + 1,
+  );
+}
+
+async function handlePointerClick(event) {
+  raycaster.setFromCamera(ndcFromEvent(event), camera);
+  const hit = raycaster.intersectObjects(soilMeshes, false)[0];
+  if (!hit) return;
+
+  const position = hit.object.userData.position;
+  const state = plots.get(position)?.state ?? "empty";
+  const action = actionFor(state);
+
   try {
-    const res = await fetch(`/api/plots/${button.dataset.position}/${button.dataset.action}`, {
-      method: "POST",
-    });
+    const res = await fetch(`/api/plots/${position}/${action}`, { method: "POST" });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      console.warn("action rejected", res.status, body.error);
+      showStatusMessage(body.error ?? "That action isn't valid for this plot right now.");
     }
-    // On success, the UI updates via the SSE `update` broadcast, not this
-    // response directly.
-  } finally {
-    button.disabled = false;
+  } catch {
+    showStatusMessage("Couldn't reach the server — try again.");
+  }
+}
+
+let downX = 0;
+let downY = 0;
+renderer.domElement.addEventListener("pointerdown", (event) => {
+  downX = event.clientX;
+  downY = event.clientY;
+});
+renderer.domElement.addEventListener("pointerup", (event) => {
+  const dist = Math.hypot(event.clientX - downX, event.clientY - downY);
+  if (dist < 6) handlePointerClick(event);
+});
+
+renderer.domElement.addEventListener("pointermove", (event) => {
+  raycaster.setFromCamera(ndcFromEvent(event), camera);
+  const hit = raycaster.intersectObjects(soilMeshes, false)[0];
+  const position = hit ? hit.object.userData.position : null;
+  if (position === hoveredPosition) return;
+
+  if (hoveredPosition !== null) sceneObjects.get(hoveredPosition).soilMesh.scale.set(1, 1, 1);
+  hoveredPosition = position;
+  if (position !== null) {
+    sceneObjects.get(position).soilMesh.scale.set(1, 1.25, 1);
+    refreshStatusBarForHover(plots.get(position));
+  } else {
+    clearStatusBarHover();
   }
 });
 
-connect();
+renderer.domElement.addEventListener("pointerleave", () => {
+  if (hoveredPosition !== null) sceneObjects.get(hoveredPosition).soilMesh.scale.set(1, 1, 1);
+  hoveredPosition = null;
+  clearStatusBarHover();
+});
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  tickAnimations(performance.now());
+  renderer.render(scene, camera);
+}
+animate();

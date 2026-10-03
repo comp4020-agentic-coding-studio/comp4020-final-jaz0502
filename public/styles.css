@@ -1,45 +1,31 @@
 body {
   font-family: system-ui, sans-serif;
-  max-width: 640px;
+  max-width: 900px;
   margin: 2rem auto;
   padding: 0 1rem;
   color: #1b2a1b;
   background: #f4f8f1;
 }
 
-.grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 0.5rem;
+#scene-container {
+  width: 100%;
+  height: 70vh;
+  min-height: 420px;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  background: #bfe3f0;
   margin: 1.5rem 0;
 }
 
-.plot {
-  border: 1px solid #9fb997;
-  border-radius: 0.5rem;
-  padding: 0.5rem;
-  text-align: center;
-  background: #e7f0e1;
-}
-
-.plot--empty { background: #e7f0e1; }
-.plot--planted { background: #f3e9c7; }
-.plot--sprout { background: #d9ecc8; }
-.plot--mature { background: #b7dba0; }
-.plot--wilted { background: #e7d4c7; }
-
-.plot__label {
-  font-size: 0.8rem;
-  margin-bottom: 0.2rem;
-}
-
-.plot__watered {
-  font-size: 0.7rem;
-  color: #4b5e45;
-  margin-bottom: 0.4rem;
-}
-
-.plot button {
+#scene-container canvas {
+  display: block;
   width: 100%;
-  cursor: pointer;
+  height: 100%;
+}
+
+#status-bar {
+  min-height: 1.4em;
+  margin-top: 0;
+  font-size: 0.9rem;
+  color: #4b5e45;
 }
