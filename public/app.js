@@ -7,6 +7,8 @@ const TILE_SIZE = 0.9;
 const TILE_HEIGHT = 0.15;
 const SPACING = 1.0;
 const WATER_DURATION_MS = 900;
+// The last quarter of a plot's wilt window counts as "thirsty".
+const THIRSTY_FRACTION = 0.25;
 
 const STAGE_LABEL = {
   empty: "Empty plot",
@@ -30,6 +32,40 @@ const PALETTE = {
   wiltedWood: 0x8a6b4f,
   wiltedFoliage: 0xab8f66,
 };
+
+// Filled in by the server's `hello` event on connect. `me` is this viewer's
+// own public id; thirst is measured on the server's clock, so offset the
+// local one by however far apart the two were when hello arrived.
+let me = null;
+let wiltWindowMs = null;
+let clockOffset = 0;
+
+function serverNow() {
+  return Date.now() + clockOffset;
+}
+
+// A stable colour per person, derived from their public id.
+const colourCache = new Map();
+function colourFor(publicId) {
+  let colour = colourCache.get(publicId);
+  if (!colour) {
+    const hue = parseInt(publicId.slice(0, 6), 16) % 360;
+    colour = new THREE.Color().setHSL(hue / 360, 0.7, 0.55);
+    colourCache.set(publicId, colour);
+  }
+  return colour;
+}
+
+// 1 right after watering, falling to 0 as the plant reaches the wilt window.
+function freshnessOf(plot) {
+  if (wiltWindowMs === null || plot.lastWateredAt === null) return 1;
+  const age = serverNow() - plot.lastWateredAt;
+  return Math.min(Math.max(1 - age / wiltWindowMs, 0), 1);
+}
+
+function isThirsty(plot) {
+  return plot.state !== "empty" && plot.state !== "wilted" && freshnessOf(plot) < THIRSTY_FRACTION;
+}
 
 function formatAgo(timestampMs, now) {
   const diffMs = now - timestampMs;
@@ -210,11 +246,25 @@ for (let position = 0; position < GRID_SIZE; position++) {
   const plantGroup = buildPlant("empty");
   group.add(plantGroup);
 
+  // Care ring: a flat square frame just inside the tile edge (a 4-sided
+  // ring turned 45 degrees so its edges line up with the tile). Unlit, so
+  // its colour reads the same whatever the lighting. Raised a little so it
+  // stays visible when hovering lifts the tile.
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.48, 0.57, 4, 1, Math.PI / 4),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, side: THREE.DoubleSide }),
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.03;
+  ring.visible = false;
+  group.add(ring);
+
   scene.add(group);
   sceneObjects.set(position, {
     group,
     soilMesh,
     plantGroup,
+    ring,
     baseSoilColor: new THREE.Color(soilColorFor("empty")),
   });
 }
@@ -253,13 +303,65 @@ function tickAnimations(now) {
   }
 }
 
+const RING_GREY = new THREE.Color(0x9a9a9a);
+const RING_AMBER = new THREE.Color(0xffb020);
+const ringColour = new THREE.Color();
+
+// Colour is who watered it last; brightness is how recently; once it's in the
+// last stretch before wilting the ring pulses amber and the plant droops. The
+// droop and pulse are motion, so the warning doesn't rely on telling hues apart.
+function updateRings(now) {
+  for (const [position, obj] of sceneObjects) {
+    const plot = plots.get(position);
+    if (!plot || plot.state === "empty" || plot.state === "wilted") {
+      obj.ring.visible = false;
+      continue;
+    }
+
+    const freshness = freshnessOf(plot);
+    const tender = plot.lastWateredBy === null ? RING_GREY : colourFor(plot.lastWateredBy);
+    ringColour.copy(RING_GREY).lerp(tender, freshness);
+    let opacity = 0.35 + 0.65 * freshness;
+    let scale = 1;
+    let droop = 0;
+
+    if (freshness < THIRSTY_FRACTION) {
+      const thirst = 1 - freshness / THIRSTY_FRACTION;
+      const pulse = 0.5 + 0.5 * Math.sin(now / 250);
+      ringColour.lerp(RING_AMBER, 0.5 + 0.5 * thirst);
+      opacity = 0.45 + 0.55 * pulse;
+      scale = 1 + 0.06 * pulse;
+      droop = 0.12 * thirst;
+    }
+
+    obj.ring.visible = true;
+    obj.ring.material.color.copy(ringColour);
+    obj.ring.material.opacity = opacity;
+    obj.ring.scale.setScalar(scale);
+    obj.plantGroup.rotation.z = droop;
+  }
+}
+
 let hoveredPosition = null;
 let messageTimer = null;
 
 function refreshStatusBarForHover(plot) {
   if (!plot) return;
-  const watered = plot.lastWateredAt === null ? "" : ` — watered ${formatAgo(plot.lastWateredAt, Date.now())}`;
-  statusBar.textContent = `${STAGE_LABEL[plot.state]}${watered}`;
+  statusBar.textContent = STAGE_LABEL[plot.state];
+
+  if (plot.lastWateredAt !== null) {
+    statusBar.append(` — watered ${formatAgo(plot.lastWateredAt, serverNow())} by `);
+    if (plot.lastWateredBy !== null) {
+      const swatch = document.createElement("span");
+      swatch.className = "swatch";
+      swatch.style.background = `#${colourFor(plot.lastWateredBy).getHexString()}`;
+      statusBar.append(swatch, plot.lastWateredBy === me ? "you" : "another gardener");
+    } else {
+      statusBar.append("someone");
+    }
+  }
+
+  if (isThirsty(plot)) statusBar.append(" (thirsty)");
 }
 
 function clearStatusBarHover() {
@@ -289,6 +391,12 @@ function applyPlot(plot) {
 
 function connect() {
   const source = new EventSource("/events");
+  source.addEventListener("hello", (event) => {
+    const hello = JSON.parse(event.data);
+    me = hello.you;
+    wiltWindowMs = hello.wiltWindowMs;
+    clockOffset = hello.serverNow - Date.now();
+  });
   source.addEventListener("snapshot", (event) => {
     for (const plot of JSON.parse(event.data)) applyPlot(plot);
   });
@@ -364,7 +472,9 @@ renderer.domElement.addEventListener("pointerleave", () => {
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
-  tickAnimations(performance.now());
+  const now = performance.now();
+  tickAnimations(now);
+  updateRings(now);
   renderer.render(scene, camera);
 }
 animate();

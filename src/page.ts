@@ -9,7 +9,7 @@ export function renderPage(): string {
 </head>
 <body>
   <h1>Community Garden</h1>
-  <p>A shared, cooperative garden bed. Anyone can plant an empty plot, and anyone can water any growing plot &mdash; there's no ownership here. Drag to look around, click a plot to act on it.</p>
+  <p>A shared, cooperative garden bed. Anyone can plant an empty plot, and anyone can water any growing plot &mdash; there's no ownership here. Drag to look around, click a plot to act on it. The ring around each plant shows who watered it last, and it fades and pulses as the plant gets thirsty.</p>
   <div id="scene-container"></div>
   <p id="status-bar" role="status" aria-live="polite">Hover a plot to see its status. Click to act.</p>
   <p><a href="/readme/">About this app</a></p>
