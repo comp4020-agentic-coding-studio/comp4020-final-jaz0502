@@ -6,7 +6,8 @@ export const GRID_SIZE = 25;
 // change. Defaults are a placeholder cadence, not a load-bearing design
 // decision.
 const SEED_TO_SPROUT_MS = Number(process.env.SEED_TO_SPROUT_MS ?? 3 * 60_000);
-const SPROUT_TO_MATURE_MS = Number(process.env.SPROUT_TO_MATURE_MS ?? 7 * 60_000);
+const SPROUT_TO_TREE_MS = Number(process.env.SPROUT_TO_TREE_MS ?? 7 * 60_000);
+const TREE_TO_FRUIT_MS = Number(process.env.TREE_TO_FRUIT_MS ?? 10 * 60_000);
 const WILT_WINDOW_MS = Number(process.env.WILT_WINDOW_MS ?? 18 * 60 * 60_000);
 
 export function emptyPlot(position: number): Plot {
@@ -35,7 +36,8 @@ export function derivePlot(row: Plot, now: number): Plot {
 
   const elapsed = now - row.plantedAt;
   let state: PlotState;
-  if (elapsed >= SEED_TO_SPROUT_MS + SPROUT_TO_MATURE_MS) state = "mature";
+  if (elapsed >= SEED_TO_SPROUT_MS + SPROUT_TO_TREE_MS + TREE_TO_FRUIT_MS) state = "fruiting";
+  else if (elapsed >= SEED_TO_SPROUT_MS + SPROUT_TO_TREE_MS) state = "tree";
   else if (elapsed >= SEED_TO_SPROUT_MS) state = "sprout";
   else state = "planted";
 

@@ -1,4 +1,4 @@
-export type PlotState = "empty" | "planted" | "sprout" | "mature" | "wilted";
+export type PlotState = "empty" | "planted" | "sprout" | "tree" | "fruiting" | "wilted";
 
 export interface Plot {
   position: number;

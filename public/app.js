@@ -12,7 +12,8 @@ const STAGE_LABEL = {
   empty: "Empty plot",
   planted: "Just planted",
   sprout: "Sprouting",
-  mature: "Mature",
+  tree: "Growing tree",
+  fruiting: "Fruiting",
   wilted: "Wilted — needs composting",
 };
 
@@ -24,7 +25,7 @@ const PALETTE = {
   stemSprout: 0x6a9b46,
   foliageSprout: 0x8fc45f,
   trunk: 0x6b4423,
-  foliageMature: 0x5a9c48,
+  foliageTree: 0x5a9c48,
   fruit: 0xdd6b55,
   wiltedWood: 0x8a6b4f,
   wiltedFoliage: 0xab8f66,
@@ -104,7 +105,7 @@ function buildPlant(state) {
     return group;
   }
 
-  if (state === "mature") {
+  if (state === "tree" || state === "fruiting") {
     const trunk = new THREE.Mesh(
       new THREE.CylinderGeometry(0.06, 0.08, 0.35, 7),
       flatMaterial(PALETTE.trunk),
@@ -112,20 +113,22 @@ function buildPlant(state) {
     trunk.position.y = 0.17;
     group.add(trunk);
 
-    const foliage = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.5, 7), flatMaterial(PALETTE.foliageMature));
+    const foliage = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.5, 7), flatMaterial(PALETTE.foliageTree));
     foliage.position.y = 0.55;
     group.add(foliage);
 
-    for (let i = 0; i < 3; i++) {
-      const angle = (i / 3) * Math.PI * 2;
-      const fruit = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 4), flatMaterial(PALETTE.fruit));
-      fruit.position.set(Math.cos(angle) * 0.2, 0.45, Math.sin(angle) * 0.2);
-      group.add(fruit);
+    if (state === "fruiting") {
+      for (let i = 0; i < 3; i++) {
+        const angle = (i / 3) * Math.PI * 2;
+        const fruit = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 4), flatMaterial(PALETTE.fruit));
+        fruit.position.set(Math.cos(angle) * 0.2, 0.45, Math.sin(angle) * 0.2);
+        group.add(fruit);
+      }
     }
     return group;
   }
 
-  // wilted: a collapsed, drooping version of the mature shape.
+  // wilted: a collapsed, drooping version of the tree shape.
   const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.35, 7), flatMaterial(PALETTE.wiltedWood));
   trunk.position.y = 0.17;
   group.add(trunk);
