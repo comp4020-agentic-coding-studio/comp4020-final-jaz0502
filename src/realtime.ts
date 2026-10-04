@@ -1,7 +1,20 @@
 import type { ServerResponse } from "node:http";
 import type { Plot, PlotState } from "./types.ts";
 
-type SseEvent = { type: "snapshot"; plots: Plot[] } | { type: "update"; plot: Plot };
+// Sent once, first, on connect. `you` is the viewer's own public id so the
+// client can tell which plots they tended without any per-client payloads;
+// wiltWindowMs and serverNow let the client compute thirst on the server's
+// clock.
+export interface Hello {
+  you: string;
+  wiltWindowMs: number;
+  serverNow: number;
+}
+
+type SseEvent =
+  | { type: "hello"; hello: Hello }
+  | { type: "snapshot"; plots: Plot[] }
+  | { type: "update"; plot: Plot };
 
 // Env-overridable (short in tests) so growth/wilt transitions reach idle-but
 // -open tabs without anyone acting. This is purely a liveliness convenience,
@@ -17,8 +30,9 @@ const clients = new Set<ServerResponse>();
 const lastKnownState = new Map<number, PlotState>();
 
 function write(res: ServerResponse, event: SseEvent): void {
-  const data = JSON.stringify(event.type === "snapshot" ? event.plots : event.plot);
-  res.write(`event: ${event.type}\ndata: ${data}\n\n`);
+  const payload =
+    event.type === "hello" ? event.hello : event.type === "snapshot" ? event.plots : event.plot;
+  res.write(`event: ${event.type}\ndata: ${JSON.stringify(payload)}\n\n`);
 }
 
 // Opens a long-lived SSE stream: sends the current state once as a
@@ -26,7 +40,7 @@ function write(res: ServerResponse, event: SseEvent): void {
 // browser's EventSource reconnects on its own after a dropped connection
 // (e.g. the Fly machine stopping when idle), so no client-side retry logic
 // is needed.
-export function subscribe(res: ServerResponse, initialSnapshot: Plot[]): void {
+export function subscribe(res: ServerResponse, initialSnapshot: Plot[], hello: Hello): void {
   res.writeHead(200, {
     "content-type": "text/event-stream",
     "cache-control": "no-cache",
@@ -34,6 +48,7 @@ export function subscribe(res: ServerResponse, initialSnapshot: Plot[]): void {
   });
   clients.add(res);
   for (const plot of initialSnapshot) lastKnownState.set(plot.position, plot.state);
+  write(res, { type: "hello", hello });
   write(res, { type: "snapshot", plots: initialSnapshot });
   res.on("close", () => clients.delete(res));
 }

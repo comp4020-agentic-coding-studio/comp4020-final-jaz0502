@@ -1,16 +1,26 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import * as db from "./db.ts";
-import { derivePlot } from "./garden.ts";
-import { getOrSetIdentity } from "./identity.ts";
+import { WILT_WINDOW_MS, derivePlot } from "./garden.ts";
+import { getOrSetIdentity, publicId } from "./identity.ts";
 import { renderPage } from "./page.ts";
 import { renderReadme } from "./readme.ts";
 import { broadcastUpdate, subscribe } from "./realtime.ts";
 import { serveStatic } from "./static.ts";
 import type { Plot } from "./types.ts";
 
+// Storage and the handlers below work with raw gid cookies; anything sent to
+// a client goes through here first so a cookie never leaves the server.
+function toPublic(plot: Plot): Plot {
+  return {
+    ...plot,
+    plantedBy: plot.plantedBy === null ? null : publicId(plot.plantedBy),
+    lastWateredBy: plot.lastWateredBy === null ? null : publicId(plot.lastWateredBy),
+  };
+}
+
 export function derivedPlots(): Plot[] {
   const now = Date.now();
-  return db.listPlots().map((plot) => derivePlot(plot, now));
+  return db.listPlots().map((plot) => toPublic(derivePlot(plot, now)));
 }
 
 // Each returns the plot's new derived state on success, or null on a
@@ -92,7 +102,11 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
   }
 
   if (req.method === "GET" && pathname === "/events") {
-    subscribe(res, derivedPlots());
+    subscribe(res, derivedPlots(), {
+      you: publicId(identity),
+      wiltWindowMs: WILT_WINDOW_MS,
+      serverNow: Date.now(),
+    });
     return;
   }
 
@@ -109,9 +123,10 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
           : handleCompost(position);
 
     if (result) {
-      broadcastUpdate(result);
+      const publicResult = toPublic(result);
+      broadcastUpdate(publicResult);
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify(result));
+      res.end(JSON.stringify(publicResult));
     } else {
       res.writeHead(409, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: "Conflict: action not valid for this plot's current state" }));

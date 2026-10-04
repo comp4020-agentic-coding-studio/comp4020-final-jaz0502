@@ -8,7 +8,7 @@ export const GRID_SIZE = 25;
 const SEED_TO_SPROUT_MS = Number(process.env.SEED_TO_SPROUT_MS ?? 3 * 60_000);
 const SPROUT_TO_TREE_MS = Number(process.env.SPROUT_TO_TREE_MS ?? 7 * 60_000);
 const TREE_TO_FRUIT_MS = Number(process.env.TREE_TO_FRUIT_MS ?? 10 * 60_000);
-const WILT_WINDOW_MS = Number(process.env.WILT_WINDOW_MS ?? 18 * 60 * 60_000);
+export const WILT_WINDOW_MS = Number(process.env.WILT_WINDOW_MS ?? 18 * 60 * 60_000);
 
 export function emptyPlot(position: number): Plot {
   return {

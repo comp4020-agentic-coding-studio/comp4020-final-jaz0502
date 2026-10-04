@@ -1,7 +1,15 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 const COOKIE_NAME = "gid";
+
+// The gid cookie is the whole identity, so it must never leave the server:
+// anyone holding someone's gid could act as them. Clients get this one-way
+// id instead, which is stable per person (so it can drive a colour and a
+// "this is you" check) but can't be turned back into the cookie.
+export function publicId(gid: string): string {
+  return createHash("sha256").update(`garden-public-id:${gid}`).digest("hex").slice(0, 8);
+}
 
 function parseCookies(header: string | undefined): Record<string, string> {
   const out: Record<string, string> = {};
