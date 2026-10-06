@@ -7,6 +7,35 @@ body {
   background: #f4f8f1;
 }
 
+#plant-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+}
+
+.picker-label {
+  font-size: 0.9rem;
+  color: #4b5e45;
+}
+
+#plant-picker button {
+  font: inherit;
+  padding: 0.4rem 0.9rem;
+  border: 1px solid #9fb997;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #1b2a1b;
+  cursor: pointer;
+}
+
+#plant-picker button[aria-checked="true"] {
+  background: #2f6b3a;
+  border-color: #2f6b3a;
+  color: #ffffff;
+}
+
 #scene-container {
   width: 100%;
   height: 70vh;
@@ -14,7 +43,7 @@ body {
   border-radius: 0.75rem;
   overflow: hidden;
   background: #bfe3f0;
-  margin: 1.5rem 0;
+  margin: 0.75rem 0 1.5rem;
 }
 
 #scene-container canvas {

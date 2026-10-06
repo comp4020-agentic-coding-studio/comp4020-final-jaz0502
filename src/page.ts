@@ -10,6 +10,12 @@ export function renderPage(): string {
 <body>
   <h1>Community Garden</h1>
   <p>A shared, cooperative garden bed. Anyone can plant an empty plot, and anyone can water any growing plot &mdash; there's no ownership here. Drag to look around, click a plot to act on it. The ring around each plant shows who watered it last, and it fades and pulses as the plant gets thirsty.</p>
+  <div id="plant-picker" role="radiogroup" aria-label="Choose what to plant">
+    <span class="picker-label">Plant:</span>
+    <button type="button" role="radio" aria-checked="true" data-type="tree">Tree</button>
+    <button type="button" role="radio" aria-checked="false" data-type="flower">Flower</button>
+    <button type="button" role="radio" aria-checked="false" data-type="shrub">Flower shrub</button>
+  </div>
   <div id="scene-container"></div>
   <p id="status-bar" role="status" aria-live="polite">Hover a plot to see its status. Click to act.</p>
   <p><a href="/readme/">About this app</a></p>
