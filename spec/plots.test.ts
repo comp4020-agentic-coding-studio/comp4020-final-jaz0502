@@ -56,6 +56,30 @@ describe("planting", () => {
   });
 });
 
+describe("plant types", () => {
+  it("plants a tree, a flower or a flower shrub as asked, and a tree if not told", async () => {
+    const alice = newVisitor(app.url);
+    expect((await alice.post(12, "plant", { type: "flower" })).body.plantType).toBe("flower");
+    expect((await alice.post(13, "plant", { type: "shrub" })).body.plantType).toBe("shrub");
+    expect((await alice.post(14, "plant", { type: "tree" })).body.plantType).toBe("tree");
+    expect((await alice.post(15, "plant")).body.plantType).toBe("tree");
+
+    // Everyone else sees the same types.
+    expect((await plotAt(12)).plantType).toBe("flower");
+    expect((await plotAt(13)).plantType).toBe("shrub");
+  });
+
+  it("rejects a plant type it doesn't know and leaves the plot empty", async () => {
+    const alice = newVisitor(app.url);
+    expect((await alice.post(16, "plant", { type: "cactus" })).status).toBe(400);
+    expect((await alice.post(16, "plant", { type: 7 })).status).toBe(400);
+
+    const plot = await plotAt(16);
+    expect(plot.state).toBe("empty");
+    expect(plot.plantType).toBeNull();
+  });
+});
+
 describe("watering", () => {
   it("refuses to water an empty plot", async () => {
     expect((await newVisitor(app.url).post(10, "water")).status).toBe(409);
@@ -118,7 +142,10 @@ describe("composting", () => {
       expect(composted.body.state).toBe("empty");
       expect(composted.body.plantedBy).toBeNull();
 
-      expect((await bob.post(7, "plant")).status).toBe(200);
+      // Once composted it is an ordinary empty plot, so it can take any plant.
+      const replanted = await bob.post(7, "plant", { type: "flower" });
+      expect(replanted.status).toBe(200);
+      expect(replanted.body.plantType).toBe("flower");
     },
   );
 });

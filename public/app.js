@@ -14,8 +14,8 @@ const STAGE_LABEL = {
   empty: "Empty plot",
   planted: "Just planted",
   sprout: "Sprouting",
-  tree: "Growing tree",
-  fruiting: "Fruiting",
+  growing: "Growing tree",
+  mature: "Fruiting",
   wilted: "Wilted — needs composting",
 };
 
@@ -141,7 +141,7 @@ function buildPlant(state) {
     return group;
   }
 
-  if (state === "tree" || state === "fruiting") {
+  if (state === "growing" || state === "mature") {
     const trunk = new THREE.Mesh(
       new THREE.CylinderGeometry(0.06, 0.08, 0.35, 7),
       flatMaterial(PALETTE.trunk),
@@ -153,7 +153,7 @@ function buildPlant(state) {
     foliage.position.y = 0.55;
     group.add(foliage);
 
-    if (state === "fruiting") {
+    if (state === "mature") {
       for (let i = 0; i < 3; i++) {
         const angle = (i / 3) * Math.PI * 2;
         const fruit = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 4), flatMaterial(PALETTE.fruit));

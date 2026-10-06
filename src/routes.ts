@@ -1,12 +1,32 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import * as db from "./db.ts";
-import { WILT_WINDOW_MS, derivePlot } from "./garden.ts";
+import { WILT_WINDOW_MS, derivePlot, isPlantType } from "./garden.ts";
 import { getOrSetIdentity, publicId } from "./identity.ts";
 import { renderPage } from "./page.ts";
 import { renderReadme } from "./readme.ts";
 import { broadcastUpdate, subscribe } from "./realtime.ts";
 import { serveStatic } from "./static.ts";
-import type { Plot } from "./types.ts";
+import type { PlantType, Plot } from "./types.ts";
+
+const MAX_BODY_BYTES = 1024;
+
+// The plant action's optional JSON body. Returns undefined for no body, and
+// null for one that is too large or isn't valid JSON.
+async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_BODY_BYTES) return null;
+    chunks.push(chunk as Buffer);
+  }
+  if (chunks.length === 0) return undefined;
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    return null;
+  }
+}
 
 // Storage and the handlers below work with raw gid cookies; anything sent to
 // a client goes through here first so a cookie never leaves the server.
@@ -27,12 +47,12 @@ export function derivedPlots(): Plot[] {
 // conflict — the caller broadcasts the success case over SSE rather than
 // relying on the POST response, so every connected tab (including the
 // caller's own) updates through exactly one code path.
-function handlePlant(position: number, actorId: string): Plot | null {
+function handlePlant(position: number, actorId: string, plantType: PlantType): Plot | null {
   const plot = db.getPlot(position);
   if (!plot) return null;
   if (derivePlot(plot, Date.now()).state !== "empty") return null;
 
-  const updated = db.plant(position, actorId);
+  const updated = db.plant(position, actorId, plantType);
   return updated ? derivePlot(updated, Date.now()) : null;
 }
 
@@ -115,9 +135,23 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
     const position = Number(actionMatch[1]);
     const action = actionMatch[2] as "plant" | "water" | "compost";
 
+    // Which plant to put in: the optional body's `type`, a tree if there is none.
+    let plantType: PlantType = "tree";
+    if (action === "plant") {
+      const body = await readJsonBody(req);
+      const requested =
+        body === undefined ? "tree" : typeof body === "object" && body !== null ? (body as { type?: unknown }).type ?? "tree" : null;
+      if (!isPlantType(requested)) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "Unknown plant type" }));
+        return;
+      }
+      plantType = requested;
+    }
+
     const result =
       action === "plant"
-        ? handlePlant(position, identity)
+        ? handlePlant(position, identity, plantType)
         : action === "water"
           ? handleWater(position, identity)
           : handleCompost(position);

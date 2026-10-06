@@ -78,13 +78,14 @@ export async function startApp(env: Record<string, string>): Promise<PrivateApp>
 export interface PlotView {
   position: number;
   state: string;
+  plantType: string | null;
   plantedBy: string | null;
   lastWateredBy: string | null;
 }
 
 export interface Visitor {
   gid: string;
-  post: (position: number, action: string) => Promise<{ status: number; body: PlotView }>;
+  post: (position: number, action: string, body?: unknown) => Promise<{ status: number; body: PlotView }>;
 }
 
 // A visitor is just a cookie: a fresh gid is a fresh person.
@@ -92,10 +93,11 @@ export function newVisitor(url: string): Visitor {
   const gid = randomUUID();
   return {
     gid,
-    post: async (position, action) => {
+    post: async (position, action, body) => {
       const res = await fetch(new URL(`/api/plots/${position}/${action}`, url), {
         method: "POST",
-        headers: { cookie: `gid=${gid}`, ...fresh },
+        headers: { cookie: `gid=${gid}`, ...fresh, ...(body === undefined ? {} : { "content-type": "application/json" }) },
+        body: body === undefined ? undefined : JSON.stringify(body),
       });
       return { status: res.status, body: (await res.json().catch(() => ({}))) as PlotView };
     },

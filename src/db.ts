@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { GRID_SIZE } from "./garden.ts";
-import type { Plot, PlotState } from "./types.ts";
+import type { PlantType, Plot, PlotState } from "./types.ts";
 
 // Defaults to the Fly volume; overridable for local dev/CI where /data may
 // not exist or may be tmpfs.
@@ -19,6 +19,7 @@ db.exec(`
     position        INTEGER NOT NULL,
     state           TEXT    NOT NULL DEFAULT 'empty'
                     CHECK (state IN ('empty','planted','sprout','mature','wilted')),
+    plant_type      TEXT    NOT NULL DEFAULT 'tree',
     planted_at      INTEGER,
     planted_by      TEXT,
     last_watered_at INTEGER,
@@ -26,6 +27,15 @@ db.exec(`
     PRIMARY KEY (bed_id, position)
   );
 `);
+
+// CREATE TABLE IF NOT EXISTS leaves an existing table alone, so a garden that
+// was planted before plant types existed (the live volume) has no plant_type
+// column yet. Add it with the default, which turns every plant already there
+// into the tree it always was.
+const columns = db.prepare("PRAGMA table_info(plots)").all() as unknown as { name: string }[];
+if (!columns.some((column) => column.name === "plant_type")) {
+  db.exec("ALTER TABLE plots ADD COLUMN plant_type TEXT NOT NULL DEFAULT 'tree'");
+}
 
 const seed = db.prepare(
   "INSERT OR IGNORE INTO plots (bed_id, position, state) VALUES (?, ?, 'empty')",
@@ -37,6 +47,7 @@ for (let position = 0; position < GRID_SIZE; position++) {
 interface PlotRow {
   position: number;
   state: PlotState;
+  plant_type: PlantType;
   planted_at: number | null;
   planted_by: string | null;
   last_watered_at: number | null;
@@ -47,6 +58,7 @@ function rowToPlot(row: PlotRow): Plot {
   return {
     position: row.position,
     state: row.state,
+    plantType: row.state === "empty" ? null : row.plant_type,
     plantedAt: row.planted_at,
     plantedBy: row.planted_by,
     lastWateredAt: row.last_watered_at,
@@ -71,7 +83,7 @@ export function getPlot(position: number): Plot | undefined {
 
 const plantStmt = db.prepare(`
   UPDATE plots
-  SET state = 'planted', planted_at = ?, planted_by = ?, last_watered_at = ?, last_watered_by = ?
+  SET state = 'planted', plant_type = ?, planted_at = ?, planted_by = ?, last_watered_at = ?, last_watered_by = ?
   WHERE bed_id = ? AND position = ? AND state = 'empty'
 `);
 
@@ -81,9 +93,9 @@ const plantStmt = db.prepare(`
 // for this specific check. node:sqlite's DatabaseSync API is synchronous,
 // so with no `await` around this call, no other request's handler can
 // interleave between the check and the write.
-export function plant(position: number, actorId: string): Plot | undefined {
+export function plant(position: number, actorId: string, plantType: PlantType): Plot | undefined {
   const now = Date.now();
-  const result = plantStmt.run(now, actorId, now, actorId, BED_ID, position);
+  const result = plantStmt.run(plantType, now, actorId, now, actorId, BED_ID, position);
   return result.changes > 0 ? getPlot(position) : undefined;
 }
 
