@@ -1,30 +1,94 @@
+/* The garden fills the whole window; the panel and the status line float over it. */
+html,
 body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
   font-family: system-ui, sans-serif;
-  max-width: 900px;
-  margin: 2rem auto;
-  padding: 0 1rem;
   color: #1b2a1b;
-  background: #f4f8f1;
+  background: #bfe3f0;
+}
+
+#scene-container {
+  position: fixed;
+  inset: 0;
+}
+
+#scene-container canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+#panel,
+#status-bar {
+  position: fixed;
+  z-index: 2;
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.18);
+}
+
+#panel {
+  top: 16px;
+  left: 16px;
+  width: 300px;
+  box-sizing: border-box;
+  padding: 0.9rem 1rem;
+  border-radius: 14px;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+#panel h1 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+#panel-toggle {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.25rem 0.7rem;
+  border: 1px solid #9fb997;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #1b2a1b;
+  cursor: pointer;
+}
+
+#panel-body {
+  margin-top: 0.8rem;
+}
+
+.panel-label {
+  margin: 0 0 0.4rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #4b5e45;
 }
 
 #plant-picker {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 1.5rem;
-}
-
-.picker-label {
-  font-size: 0.9rem;
-  color: #4b5e45;
+  flex-direction: column;
+  gap: 0.4rem;
 }
 
 #plant-picker button {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   font: inherit;
-  padding: 0.4rem 0.9rem;
+  text-align: left;
+  padding: 0.5rem 0.8rem;
   border: 1px solid #9fb997;
-  border-radius: 999px;
+  border-radius: 10px;
   background: #ffffff;
   color: #1b2a1b;
   cursor: pointer;
@@ -36,27 +100,51 @@ body {
   color: #ffffff;
 }
 
-#scene-container {
-  width: 100%;
-  height: 70vh;
-  min-height: 420px;
-  border-radius: 0.75rem;
-  overflow: hidden;
-  background: #bfe3f0;
-  margin: 0.75rem 0 1.5rem;
+.chip {
+  flex: none;
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
 }
 
-#scene-container canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
+.chip-tree {
+  background: #3f8f3a;
+}
+
+.chip-flower {
+  background: #f58fb9;
+}
+
+.chip-shrub {
+  background: #b06ad8;
+}
+
+.panel-help {
+  margin: 0.9rem 0 0.6rem;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: #3b4d37;
+}
+
+.panel-link {
+  margin: 0;
+  font-size: 0.85rem;
 }
 
 #status-bar {
-  min-height: 1.4em;
-  margin-top: 0;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0.5rem 1rem;
+  border-radius: 999px;
   font-size: 0.9rem;
-  color: #4b5e45;
+  color: #1b2a1b;
+  text-align: center;
 }
 
 .swatch {
@@ -67,4 +155,24 @@ body {
   border-radius: 50%;
   border: 1px solid rgba(0, 0, 0, 0.25);
   vertical-align: -0.1em;
+}
+
+/* Narrow screens: the panel becomes a sheet along the bottom, and the status
+   line moves to the top so the two don't overlap. */
+@media (max-width: 700px) {
+  #panel {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: auto;
+    max-height: 48vh;
+    overflow-y: auto;
+    border-radius: 14px 14px 0 0;
+  }
+
+  #status-bar {
+    bottom: auto;
+    top: 12px;
+  }
 }

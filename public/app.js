@@ -421,15 +421,48 @@ controls.minDistance = 4;
 controls.maxDistance = 14;
 controls.maxPolarAngle = Math.PI / 2 - 0.05;
 
+const panel = document.getElementById("panel");
+const panelToggle = document.getElementById("panel-toggle");
+const panelBody = document.getElementById("panel-body");
+
+// The panel covers part of the garden, so slide the view over until the bed
+// sits in the middle of the part you can still see. On a wide window the panel
+// is on the left; on a narrow one it is a sheet along the bottom.
+function updateViewOffset() {
+  const width = container.clientWidth;
+  const height = container.clientHeight;
+  const rect = panel.getBoundingClientRect();
+  const narrow = window.matchMedia("(max-width: 700px)").matches;
+  // Collapsed, the panel is only a small pill in the corner: nothing to avoid.
+  const open = !panelBody.hidden;
+  const shiftX = narrow || !open ? 0 : rect.right / 2;
+  const shiftY = narrow ? rect.height / 2 : 0;
+
+  // The bed is about 0.9 of the window's height wide at full zoom, so if the
+  // part of the window the panel leaves free is narrower than that (a phone
+  // held upright, or a tablet with the panel open), pull the view back to fit.
+  const freeWidth = width - shiftX * 2;
+  camera.zoom = Math.min(1, freeWidth / (0.92 * height));
+  camera.setViewOffset(width, height, -shiftX, shiftY, width, height);
+}
+
 function onResize() {
   const width = container.clientWidth;
   const height = container.clientHeight;
   camera.aspect = width / height;
-  camera.updateProjectionMatrix();
   renderer.setSize(width, height);
+  updateViewOffset();
 }
 window.addEventListener("resize", onResize);
 onResize();
+
+panelToggle.addEventListener("click", () => {
+  const opening = panelBody.hidden;
+  panelBody.hidden = !opening;
+  panelToggle.setAttribute("aria-expanded", String(opening));
+  panelToggle.textContent = opening ? "Hide" : "Show";
+  updateViewOffset();
+});
 
 // position -> { group, soilMesh, plantGroup, baseSoilColor }
 const sceneObjects = new Map();
