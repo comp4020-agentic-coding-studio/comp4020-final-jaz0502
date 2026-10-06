@@ -351,6 +351,8 @@ const stars = new THREE.Points(
 );
 scene.add(stars);
 
+let dayness = 1;
+
 const skyColour = new THREE.Color();
 const ambientColour = new THREE.Color();
 const lightColour = new THREE.Color();
@@ -394,6 +396,9 @@ function updateSky() {
   // The sun is up from 0.25 to 0.75 and the moon the rest of the time.
   const sunAngle = ((phase - 0.25) / 0.5) * Math.PI;
   const moonAngle = ((((phase - 0.75) % 1) + 1) % 1 / 0.5) * Math.PI;
+  // 0 at night, easing up to 1 once the sun is well above the horizon: the
+  // insects come out with it and leave as it sets.
+  dayness = phase >= 0.25 && phase < 0.75 ? Math.min(Math.max(Math.sin(sunAngle) / 0.35, 0), 1) : 0;
   placeOnArc(sunDisc, sunAngle);
   placeOnArc(moonDisc, moonAngle);
 
@@ -578,6 +583,124 @@ function updateRings(now) {
     obj.ring.material.opacity = opacity;
     obj.ring.scale.setScalar(scale);
     obj.plantGroup.rotation.z = droop;
+  }
+}
+
+// Insects: butterflies visit a flower in bloom and bees a shrub in flower, by
+// day. They are drawn from primitives like the plants, and their paths are a
+// pure function of the server's clock and the plot, so every visitor sees them
+// in the same places with nothing sent over the wire. They keep away from
+// thirsty plants, so they only turn up where someone has been looking after
+// things.
+const BUTTERFLY_COLOURS = [0xff9a3c, 0xfff3fa, 0x6fb7ff, 0xd18bff];
+const butterflyWingMaterials = BUTTERFLY_COLOURS.map(
+  (colour) => new THREE.MeshBasicMaterial({ color: colour, side: THREE.DoubleSide }),
+);
+const butterflyBodyMaterial = new THREE.MeshBasicMaterial({ color: 0x3a2a20 });
+const beeYellowMaterial = new THREE.MeshBasicMaterial({ color: 0xffd23f });
+const beeDarkMaterial = new THREE.MeshBasicMaterial({ color: 0x2b2118 });
+const beeWingMaterial = new THREE.MeshBasicMaterial({
+  color: 0xffffff,
+  side: THREE.DoubleSide,
+  transparent: true,
+  opacity: 0.6,
+});
+
+// Wings pivot at the body: shift each geometry so its inner edge sits on the origin.
+const butterflyWingGeometry = new THREE.PlaneGeometry(0.11, 0.08).translate(0.055, 0, 0);
+const butterflyBodyGeometry = new THREE.CylinderGeometry(0.012, 0.012, 0.09, 5).rotateX(Math.PI / 2);
+const beeWingGeometry = new THREE.PlaneGeometry(0.06, 0.035).translate(0.03, 0, 0);
+const beeBodyGeometry = new THREE.SphereGeometry(0.035, 7, 5);
+
+// A pair of wings hinged at the body, one each side, lying flat until they flap.
+function addWings(group, geometry, material, height) {
+  const hinges = [];
+  for (const side of [1, -1]) {
+    const hinge = new THREE.Group();
+    hinge.position.y = height;
+    const wing = new THREE.Mesh(geometry, material);
+    wing.rotation.x = -Math.PI / 2;
+    wing.scale.x = side;
+    hinge.add(wing);
+    group.add(hinge);
+    hinges.push({ hinge, side });
+  }
+  return hinges;
+}
+
+function buildInsect(kind, index, position) {
+  const group = new THREE.Group();
+  if (kind === "butterfly") {
+    group.add(new THREE.Mesh(butterflyBodyGeometry, butterflyBodyMaterial));
+    const material = butterflyWingMaterials[(position + index) % butterflyWingMaterials.length];
+    return { group, hinges: addWings(group, butterflyWingGeometry, material, 0.005) };
+  }
+
+  const abdomen = new THREE.Mesh(beeBodyGeometry, beeYellowMaterial);
+  abdomen.scale.set(1, 0.9, 1.5);
+  const stripe = new THREE.Mesh(beeBodyGeometry, beeDarkMaterial);
+  stripe.scale.set(1.04, 0.94, 0.4);
+  stripe.position.z = -0.012;
+  const head = new THREE.Mesh(beeBodyGeometry, beeDarkMaterial);
+  head.scale.setScalar(0.65);
+  head.position.z = 0.06;
+  group.add(abdomen, stripe, head);
+  return { group, hinges: addWings(group, beeWingGeometry, beeWingMaterial, 0.03) };
+}
+
+// Where an insect is around its plant at time t (seconds), and the same a
+// moment later so it can face the way it's flying.
+function insectPath(kind, t, seed) {
+  if (kind === "butterfly") {
+    return {
+      x: 0.32 * Math.sin(0.5 * t + seed) + 0.12 * Math.sin(1.3 * t + 2 * seed),
+      y: 0.58 + 0.12 * Math.sin(1.0 * t + seed),
+      z: 0.32 * Math.cos(0.4 * t + 1.7 * seed),
+    };
+  }
+  return {
+    x: 0.2 * Math.sin(1.2 * t + seed) + 0.06 * Math.sin(4.0 * t),
+    y: 0.46 + 0.06 * Math.sin(1.9 * t + seed),
+    z: 0.2 * Math.cos(1.0 * t + seed) + 0.05 * Math.cos(3.4 * t),
+  };
+}
+
+function updateInsects(timeSeconds) {
+  const size = dayness * dayness * (3 - 2 * dayness);
+
+  for (const [position, obj] of sceneObjects) {
+    const plot = plots.get(position);
+    let kind = null;
+    if (plot && plot.state === "mature" && !isThirsty(plot)) {
+      kind = plot.plantType === "flower" ? "butterfly" : plot.plantType === "shrub" ? "bee" : null;
+    }
+
+    if (obj.insectKind !== kind) {
+      for (const insect of obj.insects ?? []) obj.group.remove(insect.group);
+      obj.insects = kind ? [buildInsect(kind, 0, position)] : [];
+      for (const insect of obj.insects) obj.group.add(insect.group);
+      obj.insectKind = kind;
+    }
+    if (!kind) continue;
+
+    obj.insects.forEach((insect, i) => {
+      insect.group.visible = size > 0.01;
+      if (size <= 0.01) return;
+
+      const seed = position * 1.7 + i * 3.1;
+      const now = insectPath(kind, timeSeconds, seed);
+      const soon = insectPath(kind, timeSeconds + 0.05, seed);
+      insect.group.position.set(now.x, now.y, now.z);
+      insect.group.rotation.y = Math.atan2(soon.x - now.x, soon.z - now.z);
+      insect.group.scale.setScalar(size * (kind === "butterfly" ? 1.4 : 1.3));
+
+      // Butterflies beat slowly and wide; a bee's wings are a blur.
+      const angle =
+        kind === "butterfly"
+          ? 0.5 + 0.7 * Math.sin(timeSeconds * 10 + seed)
+          : 0.3 + 0.35 * Math.sin(timeSeconds * 45 + seed);
+      for (const { hinge, side } of insect.hinges) hinge.rotation.z = side * angle;
+    });
   }
 }
 
@@ -768,6 +891,7 @@ function animate() {
   tickAnimations(now);
   updateRings(now);
   updateSky();
+  updateInsects(serverNow() / 1000);
   renderer.render(scene, camera);
 }
 animate();
