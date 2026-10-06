@@ -527,8 +527,65 @@ function rebuildPlant(position, type, state) {
 
 const waterAnimations = new Map();
 
-function triggerWaterEffect(position) {
+// Water drops: a burst of small drops falls onto a plot when anyone waters it,
+// tinted with the colour of whoever did. They share one geometry and one
+// material per colour, and remove themselves as they land.
+const DROP_COUNT = 12;
+const DROP_GRAVITY = 8;
+const DROP_GEOMETRY = new THREE.SphereGeometry(0.034, 6, 4);
+const dropMaterials = new Map();
+const drops = [];
+
+function dropMaterialFor(colour) {
+  const key = colour.getHex();
+  let material = dropMaterials.get(key);
+  if (!material) {
+    material = new THREE.MeshBasicMaterial({ color: colour });
+    dropMaterials.set(key, material);
+  }
+  return material;
+}
+
+function spawnDrops(position, wateredBy) {
+  const obj = sceneObjects.get(position);
+  // Lightened a little so the drops show up against the soil and the grass.
+  const colour = (wateredBy ? colourFor(wateredBy) : new THREE.Color(0x6fb7ff)).clone().lerp(new THREE.Color(0xffffff), 0.3);
+  const material = dropMaterialFor(colour);
+  const start = performance.now();
+  for (let i = 0; i < DROP_COUNT; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const radius = Math.sqrt(Math.random()) * 0.32;
+    const x = Math.cos(angle) * radius;
+    const z = Math.sin(angle) * radius;
+    const y0 = 0.95 + Math.random() * 0.25;
+    const mesh = new THREE.Mesh(DROP_GEOMETRY, material);
+    mesh.scale.set(1, 1.5, 1);
+    mesh.position.set(x, y0, z);
+    mesh.visible = false;
+    obj.group.add(mesh);
+    drops.push({ mesh, parent: obj.group, y0, start, delay: Math.random() * 280 });
+  }
+}
+
+function updateDrops(now) {
+  for (let i = drops.length - 1; i >= 0; i--) {
+    const drop = drops[i];
+    const t = (now - drop.start - drop.delay) / 1000;
+    if (t < 0) continue;
+    const y = drop.y0 - 0.5 * DROP_GRAVITY * t * t;
+    if (y <= 0.03) {
+      drop.parent.remove(drop.mesh);
+      drops.splice(i, 1);
+      continue;
+    }
+    drop.mesh.visible = true;
+    drop.mesh.position.y = y;
+  }
+}
+
+function triggerWaterEffect(position, wateredBy) {
   waterAnimations.set(position, { start: performance.now() });
+  spawnDrops(position, wateredBy);
 }
 
 function tickAnimations(now) {
@@ -792,7 +849,7 @@ function applyPlot(plot) {
 
   plots.set(plot.position, plot);
   if (stateChanged) rebuildPlant(plot.position, plot.plantType ?? "tree", plot.state);
-  if (wateredChanged) triggerWaterEffect(plot.position);
+  if (wateredChanged) triggerWaterEffect(plot.position, plot.lastWateredBy);
   if (hoveredPosition === plot.position) refreshStatusBarForHover(plot);
 }
 
@@ -892,6 +949,7 @@ function animate() {
   updateRings(now);
   updateSky();
   updateInsects(serverNow() / 1000);
+  updateDrops(now);
   renderer.render(scene, camera);
 }
 animate();
