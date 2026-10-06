@@ -26,6 +26,6 @@ Some of "good" is checked by automated tests in `spec/`:
 The rest can only be judged by a person:
 
 - The overall design and usability: It should be easy to work out how the garden works without reading anything.
-- Persistence: Plants must survive a restart or a redeployment, but the container in CI cannot restart in the middle of a test run, so no test can prove it. I judged it by restarting the live machine on Fly and checking that the planted plots were still there.
+- Persistence: Plants must survive a restart or a redeployment, but the container in CI cannot restart in the middle of a test run, so no test can prove it. I judged it by having the agent restart the live machine on Fly and check that the planted plots were still there.
 - Real-time updates: A change in one browser should appear in the others within about a second. There is no test for this, because proving that a change reaches two independent browsers needs real browsers. I judged it by watching two browsers side by side.
 - The absence of scoring: Nothing in the app keeps score, and that is a design choice rather than something a test can show.
