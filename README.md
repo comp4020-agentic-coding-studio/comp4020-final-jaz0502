@@ -29,3 +29,8 @@ The rest can only be judged by a person:
 - Persistence: Plants must survive a restart or a redeployment, but the container in CI cannot restart in the middle of a test run, so no test can prove it. I judged it by having the agent restart the live machine on Fly and check that the planted plots were still there.
 - Real-time updates: A change in one browser should appear in the others within about a second. There is no test for this, because proving that a change reaches two independent browsers needs real browsers. I judged it by watching two browsers side by side.
 - The absence of scoring: Nothing in the app keeps score, and that is a design choice rather than something a test can show.
+
+## What I looked at
+
+- The Forest app, which I used as the visual reference for the garden: plants that grow in a small 3D scene.
+- The course's final project brief and the crit 8 page, for what this README has to cover. The brief's line that some of "good" can be checked and some can only be judged is how I organised the two sections above.
