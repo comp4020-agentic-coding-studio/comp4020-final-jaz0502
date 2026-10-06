@@ -277,7 +277,7 @@ scene.add(skyLight);
 
 // A shared day: the phase comes from the server's clock (see `hello`), so
 // everyone in the garden sees the same sky at the same moment.
-let dayLengthMs = 10 * 60_000;
+let dayLengthMs = 30 * 60_000;
 
 // Phase 0 is midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset. Between keys,
 // everything is blended.

@@ -12,17 +12,18 @@ export function isPlantType(value: unknown): value is PlantType {
 // change. These are the tree's durations; the other plants scale from them, so
 // a short demo timing shortens every type. Defaults are a placeholder cadence,
 // not a load-bearing design decision.
-const SEED_TO_SPROUT_MS = Number(process.env.SEED_TO_SPROUT_MS ?? 3 * 60_000);
-const SPROUT_TO_GROWING_MS = Number(process.env.SPROUT_TO_GROWING_MS ?? 7 * 60_000);
-const GROWING_TO_MATURE_MS = Number(process.env.GROWING_TO_MATURE_MS ?? 10 * 60_000);
+const SEED_TO_SPROUT_MS = Number(process.env.SEED_TO_SPROUT_MS ?? 9 * 60_000);
+const SPROUT_TO_GROWING_MS = Number(process.env.SPROUT_TO_GROWING_MS ?? 21 * 60_000);
+const GROWING_TO_MATURE_MS = Number(process.env.GROWING_TO_MATURE_MS ?? 30 * 60_000);
 
 // Wilting is a rule of the garden, not of any one plant: every type wilts
 // after the same time without water.
 export const WILT_WINDOW_MS = Number(process.env.WILT_WINDOW_MS ?? 18 * 60 * 60_000);
 
-// One day and night in the garden's sky. Short, so a visit sees sunset and
-// night, and run on the server's clock so everyone shares the same sky.
-export const DAY_LENGTH_MS = Number(process.env.DAY_LENGTH_MS ?? 10 * 60_000);
+// One day and night in the garden's sky: slow and calm, but short enough that
+// a visit still catches a sunset or a night. Run on the server's clock so
+// everyone shares the same sky.
+export const DAY_LENGTH_MS = Number(process.env.DAY_LENGTH_MS ?? 30 * 60_000);
 
 // How fast each type moves through its stages, as a multiple of the tree's
 // durations: a flower blooms in about half the time a tree takes to fruit.
