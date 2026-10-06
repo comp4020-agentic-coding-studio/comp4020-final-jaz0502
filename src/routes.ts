@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import * as db from "./db.ts";
-import { WILT_WINDOW_MS, derivePlot, isPlantType } from "./garden.ts";
+import { DAY_LENGTH_MS, WILT_WINDOW_MS, derivePlot, isPlantType } from "./garden.ts";
 import { getOrSetIdentity, publicId } from "./identity.ts";
 import { renderPage } from "./page.ts";
 import { renderReadme } from "./readme.ts";
@@ -125,6 +125,7 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
     subscribe(res, derivedPlots(), {
       you: publicId(identity),
       wiltWindowMs: WILT_WINDOW_MS,
+      dayLengthMs: DAY_LENGTH_MS,
       serverNow: Date.now(),
     });
     return;

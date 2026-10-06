@@ -8,6 +8,7 @@ import type { Plot, PlotState } from "./types.ts";
 export interface Hello {
   you: string;
   wiltWindowMs: number;
+  dayLengthMs: number;
   serverNow: number;
 }
 

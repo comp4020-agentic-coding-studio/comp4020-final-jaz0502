@@ -255,9 +255,12 @@ const statusBar = document.getElementById("status-bar");
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xbfe3f0);
 
-const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
-camera.position.set(6, 6, 6);
-camera.lookAt(0, 0, 0);
+// Low enough, and aimed a little above the bed, that a strip of sky shows above
+// the horizon behind it.
+const CAMERA_TARGET = new THREE.Vector3(0, 0.7, 0);
+const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 120);
+camera.position.set(7, 3.6, 7);
+camera.lookAt(CAMERA_TARGET);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -265,10 +268,143 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.setSize(container.clientWidth, container.clientHeight);
 container.appendChild(renderer.domElement);
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-const sun = new THREE.DirectionalLight(0xfff4e0, 0.8);
-sun.position.set(5, 10, 7.5);
-scene.add(sun);
+const ambient = new THREE.AmbientLight(0xffffff, 0.7);
+scene.add(ambient);
+// The sun by day and the moon by night: one light that follows whichever is up.
+const skyLight = new THREE.DirectionalLight(0xfff4e0, 0.8);
+skyLight.position.set(5, 10, 7.5);
+scene.add(skyLight);
+
+// A shared day: the phase comes from the server's clock (see `hello`), so
+// everyone in the garden sees the same sky at the same moment.
+let dayLengthMs = 10 * 60_000;
+
+// Phase 0 is midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset. Between keys,
+// everything is blended.
+const SKY_KEYS = [
+  { at: 0.0, sky: 0x0b1530, ambient: 0x7d8ad8, ambientI: 0.6, light: 0xa9bcff, lightI: 0.45, stars: 1 },
+  { at: 0.19, sky: 0x0b1530, ambient: 0x7d8ad8, ambientI: 0.6, light: 0xa9bcff, lightI: 0.45, stars: 1 },
+  { at: 0.26, sky: 0xf2a37c, ambient: 0xffd2b0, ambientI: 0.5, light: 0xffb27a, lightI: 0.6, stars: 0 },
+  { at: 0.34, sky: 0xbfe3f0, ambient: 0xffffff, ambientI: 0.7, light: 0xfff4e0, lightI: 0.8, stars: 0 },
+  { at: 0.66, sky: 0xbfe3f0, ambient: 0xffffff, ambientI: 0.7, light: 0xfff4e0, lightI: 0.8, stars: 0 },
+  { at: 0.74, sky: 0xf08a5d, ambient: 0xffc39a, ambientI: 0.5, light: 0xff9a5a, lightI: 0.6, stars: 0 },
+  { at: 0.8, sky: 0x3a2f5c, ambient: 0x8a7bd1, ambientI: 0.42, light: 0xb39cff, lightI: 0.35, stars: 0.5 },
+  { at: 0.86, sky: 0x0b1530, ambient: 0x7d8ad8, ambientI: 0.6, light: 0xa9bcff, lightI: 0.45, stars: 1 },
+  { at: 1.0, sky: 0x0b1530, ambient: 0x7d8ad8, ambientI: 0.6, light: 0xa9bcff, lightI: 0.45, stars: 1 },
+];
+
+const SKY_DISTANCE = 25;
+
+// Grass all round the bed, wide enough to reach the horizon. Fog in the sky's
+// colour fades its far edge into the sky, so there's no visible rim.
+const GROUND_Y = -0.46;
+const ground = new THREE.Mesh(new THREE.CircleGeometry(80, 48), flatMaterial(0x7fae5a));
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = GROUND_Y;
+scene.add(ground);
+scene.fog = new THREE.Fog(0xbfe3f0, 22, 60);
+
+// The sun and moon rise from the horizon on the left, pass low behind the bed
+// where the camera can see them, and set behind the ground on the right.
+const ARC_BEHIND = new THREE.Vector3(-1, 0, -1).normalize().multiplyScalar(45);
+const ARC_ACROSS = new THREE.Vector3(1, 0, -1).normalize().multiplyScalar(40);
+const ARC_HEIGHT = 7.5;
+
+// Flat discs that always face the camera: a sphere this far out at the edge of
+// the frame gets stretched into an oval by the perspective, a sprite doesn't.
+function discTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 64;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.arc(32, 32, 30, 0, Math.PI * 2);
+  ctx.fill();
+  return new THREE.CanvasTexture(canvas);
+}
+const DISC_TEXTURE = discTexture();
+
+function skyDisc(size, colour) {
+  const disc = new THREE.Sprite(
+    new THREE.SpriteMaterial({ map: DISC_TEXTURE, color: colour, transparent: true, fog: false }),
+  );
+  disc.scale.set(size, size, 1);
+  return disc;
+}
+const sunDisc = skyDisc(4.4, 0xffe08a);
+const moonDisc = skyDisc(3.2, 0xe8eeff);
+scene.add(sunDisc, moonDisc);
+
+// Stars over the whole sky above the horizon.
+const starPositions = [];
+for (let i = 0; i < 500; i++) {
+  const height = 0.03 + Math.random() * 0.97;
+  const angle = Math.random() * Math.PI * 2;
+  const across = Math.sqrt(1 - height * height);
+  starPositions.push(Math.cos(angle) * across * 40, height * 40, Math.sin(angle) * across * 40);
+}
+const starGeometry = new THREE.BufferGeometry();
+starGeometry.setAttribute("position", new THREE.Float32BufferAttribute(starPositions, 3));
+const stars = new THREE.Points(
+  starGeometry,
+  new THREE.PointsMaterial({ color: 0xffffff, size: 0.35, transparent: true, opacity: 0, depthWrite: false, fog: false }),
+);
+scene.add(stars);
+
+const skyColour = new THREE.Color();
+const ambientColour = new THREE.Color();
+const lightColour = new THREE.Color();
+const keyColourA = new THREE.Color();
+const keyColourB = new THREE.Color();
+
+function blendColour(target, from, to, t) {
+  keyColourA.setHex(from);
+  keyColourB.setHex(to);
+  return target.lerpColors(keyColourA, keyColourB, t);
+}
+
+// Where the sun or moon sits on its arc: angle 0 as it rises on the left, PI as
+// it sets on the right. Below the horizon the ground hides it, and it fades at
+// the horizon rather than popping.
+function placeOnArc(mesh, angle) {
+  mesh.position
+    .copy(ARC_BEHIND)
+    .addScaledVector(ARC_ACROSS, -Math.cos(angle))
+    .setY(GROUND_Y + Math.sin(angle) * ARC_HEIGHT);
+  const opacity = Math.min(Math.max(Math.sin(angle) * 5, 0), 1);
+  mesh.material.opacity = opacity;
+  mesh.visible = opacity > 0.01;
+}
+
+function updateSky() {
+  const phase = (((serverNow() % dayLengthMs) + dayLengthMs) % dayLengthMs) / dayLengthMs;
+  let i = 0;
+  while (i < SKY_KEYS.length - 2 && SKY_KEYS[i + 1].at <= phase) i++;
+  const from = SKY_KEYS[i];
+  const to = SKY_KEYS[i + 1];
+  const t = (phase - from.at) / (to.at - from.at);
+
+  scene.background = blendColour(skyColour, from.sky, to.sky, t);
+  scene.fog.color.copy(skyColour);
+  ambient.color.copy(blendColour(ambientColour, from.ambient, to.ambient, t));
+  ambient.intensity = from.ambientI + (to.ambientI - from.ambientI) * t;
+  stars.material.opacity = from.stars + (to.stars - from.stars) * t;
+  stars.visible = stars.material.opacity > 0.01;
+
+  // The sun is up from 0.25 to 0.75 and the moon the rest of the time.
+  const sunAngle = ((phase - 0.25) / 0.5) * Math.PI;
+  const moonAngle = ((((phase - 0.75) % 1) + 1) % 1 / 0.5) * Math.PI;
+  placeOnArc(sunDisc, sunAngle);
+  placeOnArc(moonDisc, moonAngle);
+
+  // The light follows whichever body is up, and fades to nothing at the
+  // horizon so the swap between sun and moon doesn't make the shadows jump.
+  const lightAngle = phase >= 0.25 && phase < 0.75 ? sunAngle : moonAngle;
+  const height = Math.sin(lightAngle);
+  skyLight.position.set(Math.cos(lightAngle) * SKY_DISTANCE, Math.max(height, 0.05) * SKY_DISTANCE, SKY_DISTANCE * 0.35);
+  skyLight.color.copy(blendColour(lightColour, from.light, to.light, t));
+  skyLight.intensity = (from.lightI + (to.lightI - from.lightI) * t) * Math.min(Math.max(height / 0.3, 0), 1);
+}
 
 const bedBase = new THREE.Mesh(
   new THREE.BoxGeometry(COLS * SPACING + 0.6, 0.3, COLS * SPACING + 0.6),
@@ -278,7 +414,7 @@ bedBase.position.y = -0.3;
 scene.add(bedBase);
 
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 0, 0);
+controls.target.copy(CAMERA_TARGET);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.minDistance = 4;
@@ -510,6 +646,7 @@ function connect() {
     const hello = JSON.parse(event.data);
     me = hello.you;
     wiltWindowMs = hello.wiltWindowMs;
+    dayLengthMs = hello.dayLengthMs;
     clockOffset = hello.serverNow - Date.now();
   });
   source.addEventListener("snapshot", (event) => {
@@ -597,6 +734,7 @@ function animate() {
   const now = performance.now();
   tickAnimations(now);
   updateRings(now);
+  updateSky();
   renderer.render(scene, camera);
 }
 animate();

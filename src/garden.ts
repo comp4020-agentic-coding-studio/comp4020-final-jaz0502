@@ -20,6 +20,10 @@ const GROWING_TO_MATURE_MS = Number(process.env.GROWING_TO_MATURE_MS ?? 10 * 60_
 // after the same time without water.
 export const WILT_WINDOW_MS = Number(process.env.WILT_WINDOW_MS ?? 18 * 60 * 60_000);
 
+// One day and night in the garden's sky. Short, so a visit sees sunset and
+// night, and run on the server's clock so everyone shares the same sky.
+export const DAY_LENGTH_MS = Number(process.env.DAY_LENGTH_MS ?? 10 * 60_000);
+
 // How fast each type moves through its stages, as a multiple of the tree's
 // durations: a flower blooms in about half the time a tree takes to fruit.
 const GROWTH_SCALE: Record<PlantType, number> = { tree: 1, flower: 0.5, shrub: 0.75 };
