@@ -26,6 +26,7 @@ export function renderPage(): string {
         <p class="panel-label">Who's here</p>
         <div id="who-dots"></div>
         <p id="who-count">Just you here</p>
+        <button type="button" id="wave-button" aria-label="Wave hello to everyone in the garden">Wave</button>
       </div>
       <p class="panel-help">A shared garden: anyone can plant an empty plot, and anyone can water any plot. Drag to look around and click a plot to act on it. The ring around a plant shows who watered it last, and it pulses when the plant gets thirsty.</p>
       <p class="panel-link"><a href="/readme/">About this app</a></p>

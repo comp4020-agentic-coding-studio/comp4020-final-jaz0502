@@ -1214,6 +1214,12 @@ const FIGURE_BRIM = new THREE.CylinderGeometry(0.23, 0.23, 0.02, 10);
 const FIGURE_CROWN = new THREE.CylinderGeometry(0.1, 0.13, 0.1, 8);
 const FIGURE_SHADOW = new THREE.CircleGeometry(0.2, 12);
 const FIGURE_MARKER = new THREE.ConeGeometry(0.08, 0.16, 6).rotateX(Math.PI);
+// An arm hangs from its shoulder, so it is drawn downwards from the pivot.
+const FIGURE_ARM = new THREE.CylinderGeometry(0.035, 0.035, 0.22, 6).translate(0, -0.11, 0);
+const FIGURE_HAND = new THREE.SphereGeometry(0.05, 6, 4);
+const ARM_REST = 0.15;
+const WAVE_MS = 2000;
+const WAVE_RING = new THREE.RingGeometry(0.25, 0.3, 40);
 const skinMaterial = flatMaterial(0xf2c9a0);
 const strawMaterial = flatMaterial(0xe8c872);
 const shadowMaterial = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25, depthWrite: false });
@@ -1234,6 +1240,21 @@ function createFigure(id, u) {
   shadow.position.y = 0.006;
   group.add(body, head, brim, crown, shadow);
 
+  // Two arms hanging at the sides. The right one is the one that waves.
+  const makeArm = (side) => {
+    const pivot = new THREE.Group();
+    pivot.position.set(side * 0.13, 0.4, 0);
+    pivot.rotation.z = side * ARM_REST;
+    const sleeve = new THREE.Mesh(FIGURE_ARM, bodyMaterial);
+    const hand = new THREE.Mesh(FIGURE_HAND, skinMaterial);
+    hand.position.y = -0.24;
+    pivot.add(sleeve, hand);
+    return pivot;
+  };
+  const leftArm = makeArm(-1);
+  const rightArm = makeArm(1);
+  group.add(leftArm, rightArm);
+
   const ownMaterials = [bodyMaterial];
   let marker = null;
   if (id === me) {
@@ -1246,7 +1267,7 @@ function createFigure(id, u) {
   }
 
   scene.add(group);
-  const figure = { group, body, marker, ownMaterials, u, target: u, heading: 1, phase: Math.random() * 6.28 };
+  const figure = { group, body, rightArm, waveStart: null, marker, ownMaterials, u, target: u, heading: 1, phase: Math.random() * 6.28 };
   figures.set(id, figure);
   return figure;
 }
@@ -1326,6 +1347,57 @@ function updateFigures(now) {
     figure.group.position.set(here.x, PATH_TOP + (walking ? Math.abs(step) * 0.05 : 0), here.z);
     figure.body.rotation.z = walking ? step * 0.08 : 0;
     if (figure.marker) figure.marker.position.y = 1.05 + Math.sin(t * 3) * 0.05;
+
+    // A wave: the right arm lifts quickly, swings for a while and drops again.
+    if (figure.waveStart !== null) {
+      const w = (now - figure.waveStart) / WAVE_MS;
+      if (w >= 1) {
+        figure.waveStart = null;
+        figure.rightArm.rotation.z = ARM_REST;
+      } else {
+        const lift = Math.min(w / 0.12, (1 - w) / 0.12, 1);
+        figure.rightArm.rotation.z = ARM_REST + lift * (2.3 + 0.4 * Math.sin(t * 14));
+      }
+    }
+  }
+}
+
+// A wave also sends a soft ring out across the path from the figure, in the
+// gardener's colour, so you notice it from across the garden. Like the drops and
+// the badges it has its own material, which goes when the ring does.
+const waveRings = [];
+
+function waveFigure(id) {
+  const figure = figures.get(id);
+  if (!figure) return;
+
+  figure.waveStart = performance.now();
+  const material = new THREE.MeshBasicMaterial({
+    color: colourFor(id),
+    transparent: true,
+    opacity: 0.8,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const ring = new THREE.Mesh(WAVE_RING, material);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.02;
+  figure.group.add(ring);
+  waveRings.push({ ring, material, parent: figure.group, start: figure.waveStart });
+}
+
+function updateWaveRings(now) {
+  for (let i = waveRings.length - 1; i >= 0; i--) {
+    const wave = waveRings[i];
+    const t = (now - wave.start) / (WAVE_MS * 0.9);
+    if (t >= 1) {
+      wave.parent.remove(wave.ring);
+      wave.material.dispose();
+      waveRings.splice(i, 1);
+      continue;
+    }
+    wave.ring.scale.setScalar(1 + 3.5 * t);
+    wave.material.opacity = 0.8 * (1 - t);
   }
 }
 
@@ -1386,8 +1458,20 @@ function connect() {
     removeFigure(JSON.parse(event.data).id);
     renderWhoIsHere();
   });
+  source.addEventListener("wave", (event) => waveFigure(JSON.parse(event.data).id));
 }
 connect();
+
+// The Wave button. The server drops a wave sent too soon after the last, so grey
+// the button out for about as long, and let the event, not the reply, show it.
+const waveButton = document.getElementById("wave-button");
+waveButton.addEventListener("click", () => {
+  waveButton.disabled = true;
+  setTimeout(() => {
+    waveButton.disabled = false;
+  }, 1500);
+  fetch("/api/wave", { method: "POST" }).catch(() => {});
+});
 
 const raycaster = new THREE.Raycaster();
 const GROUND_PLANE = new THREE.Plane(new THREE.Vector3(0, 1, 0), -GROUND_Y);
@@ -1482,6 +1566,7 @@ function animate() {
   updateDrops(now);
   updateBadges(now);
   updateFigures(now);
+  updateWaveRings(now);
   renderer.render(scene, camera);
 }
 animate();
