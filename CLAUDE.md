@@ -7,6 +7,7 @@ These come from `README.md`, which says what "good" means for this app. If a rul
 - Never add scoring, points, rankings or any win or lose state. The garden is a shared, collaborative space.
 - Never send a visitor's `gid` cookie to anyone. It is their whole identity. Clients only get the one-way `publicId(gid)`, and anything leaving the server goes through `toPublic()` in `src/routes.ts`. `spec/privacy.test.ts` enforces this.
 - Never let one visitor overwrite or remove another's healthy plant. Planting only works on an empty plot, and composting only on a wilted one.
+- Never put a gardener's figure on the plots. Figures walk only along the flagstone path round the bed.
 
 ## What a change must not break
 
@@ -14,6 +15,8 @@ These come from `README.md`, which says what "good" means for this app. If a rul
 - Watering resets the wilt clock, and a wilted plot cannot be watered or replanted until someone composts it.
 - A plot's stage is derived from stored timestamps by `derivePlot` in `src/garden.ts`. Never use a per-plot timer, because Fly stops the machine when it is idle. The database only stores `empty` or `planted`.
 - Live updates go over Server-Sent Events (`/events`). The page changes in response to those events, not to the POST response.
+- A figure's position is only for show. Where a gardener's figure stands never limits what anyone can do to a plot, and no action may depend on it.
+- Presence lives in memory only and is keyed by the public id, so two tabs from one browser are one gardener with one figure. A stranger's browser is a source of messages, so `POST /api/presence` stays validated, rate-limited and capped (`src/presence.ts`). `spec/presence.test.ts` enforces this.
 - The course invariants keep passing: `/` returns 200 and `/readme/` publishes the README's headings.
 - The app runs on one 256 MB Fly machine with one volume at `/data`. Do not change the fixed settings in `fly.toml`.
 
@@ -23,4 +26,5 @@ These come from `README.md`, which says what "good" means for this app. If a rul
 - Check anything visual in a real browser, not just with types and tests.
 - Before a deploy, build the Docker image and run `pnpm check` against it, as CI does. CI deploys every push to `main`, so only deploy by hand if asked.
 - When a rule changes, change the spec and the README in the same step. A claim in the README must match what a spec enforces or be listed as judged.
+- Never move the `crit-8` tag again. It is frozen on `0d788b8`, because after a crit's cutoff its tag records what the tutor marked. Later crits get their own tags (`crit-9`, `crit-10`), made only when asked.
 - In the process docs, say who did what. If the agent ran a check or a restart, say so, and do not invent sources or claim the author read or did something they did not.
