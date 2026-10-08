@@ -351,6 +351,106 @@ const stars = new THREE.Points(
 );
 scene.add(stars);
 
+// Clouds: soft, thin and wispy, on a wide ring round the garden, drifting
+// slowly. Each is a few translucent sprites painted with soft-edged puffs, so
+// the edges blur like real cloud instead of showing facets. They are tinted from
+// the sky's own colour (white by day, peach at sunset, a dim blue at night) and
+// ignore the fog so they stay visible out at the horizon. Positions are a pure
+// function of the server's clock, so everyone sees the same clouds in the same
+// places. Seen from the default view they drift from left to right.
+const CLOUD_COUNT = 16;
+
+// A fixed pseudo-random number in [0, 1) for each n, so the clouds are the same
+// shape and place for everyone.
+function seeded(n) {
+  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+// One cloud texture: a row of overlapping soft puffs, taller in the middle, with
+// the bottom faded away so it sits flat like a real cloud base.
+function cloudTexture(seed) {
+  const width = 256;
+  const height = 96;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+
+  const puffs = 9;
+  for (let i = 0; i < puffs; i++) {
+    const t = i / (puffs - 1);
+    const bump = Math.sin(t * Math.PI);
+    const x = width * (0.12 + 0.76 * t) + (seeded(seed * 17 + i) - 0.5) * 18;
+    const radius = 14 + bump * 20 * (0.6 + seeded(seed * 29 + i) * 0.8);
+    const y = height * 0.62 - bump * 10 * seeded(seed * 41 + i);
+    const puff = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    puff.addColorStop(0, "rgba(255,255,255,0.55)");
+    puff.addColorStop(0.5, "rgba(255,255,255,0.28)");
+    puff.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = puff;
+    ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+  }
+
+  ctx.globalCompositeOperation = "destination-in";
+  const base = ctx.createLinearGradient(0, 0, 0, height);
+  base.addColorStop(0, "rgba(0,0,0,1)");
+  base.addColorStop(0.6, "rgba(0,0,0,1)");
+  base.addColorStop(0.88, "rgba(0,0,0,0)");
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, width, height);
+  return new THREE.CanvasTexture(canvas);
+}
+
+const cloudMaterials = [0, 1, 2].map(
+  (seed) => new THREE.SpriteMaterial({ map: cloudTexture(seed), transparent: true, depthWrite: false, fog: false }),
+);
+
+const clouds = [];
+for (let i = 0; i < CLOUD_COUNT; i++) {
+  const group = new THREE.Group();
+  const width = 12 + seeded(i * 19) * 9;
+
+  // The body of the cloud, a smaller one tucked beside it, and a long thin wisp.
+  const parts = [
+    { material: i % 3, x: 0, y: 0, w: width, h: width * 0.28 },
+    { material: (i + 1) % 3, x: (seeded(i * 7) - 0.5) * width * 0.6, y: width * 0.03, w: width * 0.65, h: width * 0.2 },
+    { material: (i + 2) % 3, x: (seeded(i * 11) - 0.5) * width * 0.3, y: -width * 0.02, w: width * 1.35, h: width * 0.12 },
+  ];
+  for (const part of parts) {
+    const sprite = new THREE.Sprite(cloudMaterials[part.material]);
+    sprite.position.set(part.x, part.y, 0);
+    sprite.scale.set(part.w, part.h, 1);
+    group.add(sprite);
+  }
+  scene.add(group);
+  clouds.push({
+    group,
+    theta0: (i / CLOUD_COUNT) * Math.PI * 2 + seeded(i * 29) * 0.4,
+    radius: 50 + seeded(i * 31) * 16,
+    height: GROUND_Y + 3.8 + seeded(i * 37) * 3.4,
+    speed: 0.004 + seeded(i * 41) * 0.004,
+  });
+}
+
+const CLOUD_WHITE = new THREE.Color(0xffffff);
+const cloudColour = new THREE.Color();
+
+function updateClouds(timeSeconds) {
+  // The sky's own colour, mixed toward white the brighter the sky is: pure white
+  // at noon, a pale peach against a sunset and a dim blue at night.
+  const brightness = skyColour.r * 0.2126 + skyColour.g * 0.7152 + skyColour.b * 0.0722;
+  cloudColour.copy(skyColour).lerp(CLOUD_WHITE, Math.min(0.2 + 0.85 * brightness, 0.95));
+  for (const material of cloudMaterials) material.color.copy(cloudColour);
+
+  for (const cloud of clouds) {
+    const theta = cloud.theta0 + cloud.speed * timeSeconds;
+    cloud.group.position.set(Math.cos(theta) * cloud.radius, cloud.height, Math.sin(theta) * cloud.radius);
+    // The cloud's long axis lies along its path.
+    cloud.group.rotation.y = -(theta + Math.PI / 2);
+  }
+}
+
 let dayness = 1;
 
 const skyColour = new THREE.Color();
@@ -948,6 +1048,7 @@ function animate() {
   tickAnimations(now);
   updateRings(now);
   updateSky();
+  updateClouds(serverNow() / 1000);
   updateInsects(serverNow() / 1000);
   updateDrops(now);
   renderer.render(scene, camera);
