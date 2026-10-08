@@ -3,8 +3,9 @@ import * as db from "./db.ts";
 import { DAY_LENGTH_MS, WILT_WINDOW_MS, derivePlot, isPlantType } from "./garden.ts";
 import { getOrSetIdentity, publicId } from "./identity.ts";
 import { renderPage } from "./page.ts";
+import { move as moveGardener } from "./presence.ts";
 import { renderReadme } from "./readme.ts";
-import { broadcastUpdate, subscribe } from "./realtime.ts";
+import { broadcastPresenceUpdate, broadcastUpdate, subscribe } from "./realtime.ts";
 import { serveStatic } from "./static.ts";
 import type { PlantType, Plot } from "./types.ts";
 
@@ -122,12 +123,39 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
   }
 
   if (req.method === "GET" && pathname === "/events") {
-    subscribe(res, derivedPlots(), {
-      you: publicId(identity),
-      wiltWindowMs: WILT_WINDOW_MS,
-      dayLengthMs: DAY_LENGTH_MS,
-      serverNow: Date.now(),
-    });
+    subscribe(
+      res,
+      derivedPlots(),
+      {
+        you: publicId(identity),
+        wiltWindowMs: WILT_WINDOW_MS,
+        dayLengthMs: DAY_LENGTH_MS,
+        serverNow: Date.now(),
+      },
+      publicId(identity),
+    );
+    return;
+  }
+
+  // A gardener says where their figure is and where it is walking to. Nothing
+  // here limits what they can do to a plot: a figure's place is only for show.
+  if (req.method === "POST" && pathname === "/api/presence") {
+    const result = moveGardener(publicId(identity), await readJsonBody(req), Date.now());
+    if (!result.ok) {
+      const status = result.reason === "invalid" ? 400 : result.reason === "not-connected" ? 409 : 429;
+      const error =
+        result.reason === "invalid"
+          ? "u and target must be numbers from 0 up to but not including 1"
+          : result.reason === "not-connected"
+            ? "Not connected: open the garden's event stream first"
+            : "Too many moves: slow down";
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error }));
+      return;
+    }
+    broadcastPresenceUpdate(result.gardener);
+    res.writeHead(204);
+    res.end();
     return;
   }
 

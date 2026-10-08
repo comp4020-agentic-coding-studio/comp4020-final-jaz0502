@@ -1,4 +1,5 @@
 import type { ServerResponse } from "node:http";
+import { type Gardener, connect, disconnect, listGardeners } from "./presence.ts";
 import type { Plot, PlotState } from "./types.ts";
 
 // Sent once, first, on connect. `you` is the viewer's own public id so the
@@ -15,7 +16,12 @@ export interface Hello {
 type SseEvent =
   | { type: "hello"; hello: Hello }
   | { type: "snapshot"; plots: Plot[] }
-  | { type: "update"; plot: Plot };
+  | { type: "update"; plot: Plot }
+  // Who is in the garden: the whole list once on connect, then one gardener
+  // arriving or moving, or leaving. Public ids only.
+  | { type: "presence"; gardeners: Gardener[] }
+  | { type: "presence-update"; gardener: Gardener }
+  | { type: "presence-leave"; id: string };
 
 // Env-overridable (short in tests) so growth/wilt transitions reach idle-but
 // -open tabs without anyone acting. This is purely a liveliness convenience,
@@ -30,10 +36,29 @@ const clients = new Set<ServerResponse>();
 // time anyone was told, instead of re-sending all 25 every tick.
 const lastKnownState = new Map<number, PlotState>();
 
+function payloadOf(event: SseEvent): unknown {
+  switch (event.type) {
+    case "hello":
+      return event.hello;
+    case "snapshot":
+      return event.plots;
+    case "update":
+      return event.plot;
+    case "presence":
+      return event.gardeners;
+    case "presence-update":
+      return event.gardener;
+    case "presence-leave":
+      return { id: event.id };
+  }
+}
+
 function write(res: ServerResponse, event: SseEvent): void {
-  const payload =
-    event.type === "hello" ? event.hello : event.type === "snapshot" ? event.plots : event.plot;
-  res.write(`event: ${event.type}\ndata: ${JSON.stringify(payload)}\n\n`);
+  res.write(`event: ${event.type}\ndata: ${JSON.stringify(payloadOf(event))}\n\n`);
+}
+
+function broadcast(event: SseEvent): void {
+  for (const res of clients) write(res, event);
 }
 
 // Opens a long-lived SSE stream: sends the current state once as a
@@ -41,22 +66,43 @@ function write(res: ServerResponse, event: SseEvent): void {
 // browser's EventSource reconnects on its own after a dropped connection
 // (e.g. the Fly machine stopping when idle), so no client-side retry logic
 // is needed.
-export function subscribe(res: ServerResponse, initialSnapshot: Plot[], hello: Hello): void {
+export function subscribe(
+  res: ServerResponse,
+  initialSnapshot: Plot[],
+  hello: Hello,
+  gardenerId: string,
+): void {
   res.writeHead(200, {
     "content-type": "text/event-stream",
     "cache-control": "no-cache",
     connection: "keep-alive",
   });
+
+  // Tell everyone already here that a new gardener has arrived, before this
+  // connection joins the list, so they aren't told about themselves twice. A
+  // second tab from someone already here isn't an arrival.
+  const arrived = connect(gardenerId);
+  if (arrived) broadcast({ type: "presence-update", gardener: arrived });
+
   clients.add(res);
   for (const plot of initialSnapshot) lastKnownState.set(plot.position, plot.state);
   write(res, { type: "hello", hello });
   write(res, { type: "snapshot", plots: initialSnapshot });
-  res.on("close", () => clients.delete(res));
+  write(res, { type: "presence", gardeners: listGardeners() });
+
+  res.on("close", () => {
+    clients.delete(res);
+    if (disconnect(gardenerId)) broadcast({ type: "presence-leave", id: gardenerId });
+  });
 }
 
 export function broadcastUpdate(plot: Plot): void {
   lastKnownState.set(plot.position, plot.state);
-  for (const res of clients) write(res, { type: "update", plot });
+  broadcast({ type: "update", plot });
+}
+
+export function broadcastPresenceUpdate(gardener: Gardener): void {
+  broadcast({ type: "presence-update", gardener });
 }
 
 export function clientCount(): number {

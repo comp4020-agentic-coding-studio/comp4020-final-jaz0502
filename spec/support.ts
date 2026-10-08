@@ -122,3 +122,80 @@ export async function readPlots(url: string): Promise<PlotView[]> {
   const block = raw.split("\n\n").find((b) => b.startsWith("event: snapshot"))!;
   return JSON.parse(block.split("\n").find((l) => l.startsWith("data: "))!.slice("data: ".length));
 }
+
+export interface SseFrame {
+  event: string;
+  data: unknown;
+}
+
+export interface Stream {
+  frames: SseFrame[];
+  raw: () => string;
+  // Resolves with the first frame, already received or still to come, that the
+  // predicate accepts; rejects if none turns up in time.
+  waitFor: (predicate: (frame: SseFrame) => boolean, timeoutMs?: number) => Promise<SseFrame>;
+  close: () => void;
+}
+
+// A visitor who stays connected to /events and collects every frame it sends,
+// for specs about things that happen over time.
+export async function openStream(url: string, gid: string): Promise<Stream> {
+  const controller = new AbortController();
+  const res = await fetch(new URL("/events", url), {
+    headers: { cookie: `gid=${gid}`, ...fresh },
+    signal: controller.signal,
+  });
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  const frames: SseFrame[] = [];
+  let raw = "";
+  let parsedUpTo = 0;
+
+  void (async () => {
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) return;
+        raw += decoder.decode(value, { stream: true });
+        for (;;) {
+          const end = raw.indexOf("\n\n", parsedUpTo);
+          if (end === -1) break;
+          const block = raw.slice(parsedUpTo, end);
+          parsedUpTo = end + 2;
+          const event = block.split("\n").find((l) => l.startsWith("event: "))?.slice("event: ".length);
+          const data = block.split("\n").find((l) => l.startsWith("data: "))?.slice("data: ".length);
+          if (event !== undefined && data !== undefined) frames.push({ event, data: JSON.parse(data) });
+        }
+      }
+    } catch {
+      // closed on purpose
+    }
+  })();
+
+  return {
+    frames,
+    raw: () => raw,
+    waitFor: async (predicate, timeoutMs = 1500) => {
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        const found = frames.find(predicate);
+        if (found) return found;
+        if (Date.now() > deadline) {
+          throw new Error(`no matching frame within ${timeoutMs}ms; got: ${frames.map((f) => f.event).join(", ")}`);
+        }
+        await sleep(20);
+      }
+    },
+    close: () => controller.abort(),
+  };
+}
+
+// Tells the garden where a visitor's figure is and where it is going.
+export async function postPresence(url: string, gid: string, body: unknown): Promise<number> {
+  const res = await fetch(new URL("/api/presence", url), {
+    method: "POST",
+    headers: { cookie: `gid=${gid}`, "content-type": "application/json", ...fresh },
+    body: typeof body === "string" ? body : JSON.stringify(body),
+  });
+  return res.status;
+}
