@@ -518,6 +518,113 @@ const bedBase = new THREE.Mesh(
 bedBase.position.y = -0.3;
 scene.add(bedBase);
 
+// The path: large flagstones set in earth, in a ring round the bed, where the
+// gardeners walk. The loop is the square line down the middle of it, and a
+// position on it is a fraction u from 0 up to but not including 1, so the server
+// never needs to know its shape.
+const PATH_INNER = 2.8;
+const PATH_OUTER = 4.5;
+const PATH_TOP = GROUND_Y + 0.07;
+const LOOP_HALF = 3.35;
+
+// Earth showing in the gaps between the stones, so they read as set in the ground
+// rather than laid on the grass.
+const earthMaterial = flatMaterial(0x8a7556);
+for (const [x, z, width, depth] of [
+  [0, -3.7, 9.4, 2.0],
+  [0, 3.7, 9.4, 2.0],
+  [-3.7, 0, 2.0, 5.4],
+  [3.7, 0, 2.0, 5.4],
+]) {
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(width, 0.03, depth), earthMaterial);
+  slab.position.set(x, GROUND_Y + 0.015, z);
+  scene.add(slab);
+}
+
+// One flagstone: an irregular seven-sided slab with softened edges, never the
+// same shape twice.
+function flagstoneGeometry(seed) {
+  const sides = 7;
+  const outline = new THREE.Shape();
+  for (let i = 0; i < sides; i++) {
+    const angle = (i / sides) * Math.PI * 2 + (seeded(seed * 7 + i) - 0.5) * 0.4;
+    const radius = 0.5 * (0.82 + seeded(seed * 13 + i) * 0.3);
+    const x = Math.cos(angle) * radius;
+    const y = Math.sin(angle) * radius;
+    if (i === 0) outline.moveTo(x, y);
+    else outline.lineTo(x, y);
+  }
+  outline.closePath();
+  const geometry = new THREE.ExtrudeGeometry(outline, {
+    depth: 0.05,
+    bevelEnabled: true,
+    bevelThickness: 0.015,
+    bevelSize: 0.03,
+    bevelSegments: 1,
+  });
+  geometry.rotateX(-Math.PI / 2);
+  return geometry;
+}
+
+const flagstoneGeometries = [0, 1, 2, 3, 4, 5, 6, 7].map(flagstoneGeometry);
+const stoneMaterials = [0x9b968d, 0x8c8880, 0xa8a398, 0x7d7a73, 0xb0aa9d].map((colour) => flatMaterial(colour));
+
+// Stones on a loose, jittered grid across the band: two across, each turned and
+// sized a little differently, with small gaps between.
+const STONE_SPACING = 0.95;
+for (let ix = -5; ix <= 5; ix++) {
+  for (let iz = -5; iz <= 5; iz++) {
+    const n = ix * 53 + iz * 29;
+    const x = ix * STONE_SPACING + (seeded(n + 1) - 0.5) * 0.16;
+    const z = iz * STONE_SPACING + (seeded(n + 2) - 0.5) * 0.16;
+    const edge = Math.max(Math.abs(x), Math.abs(z));
+    if (edge < PATH_INNER || edge > PATH_OUTER) continue;
+
+    const stone = new THREE.Mesh(
+      flagstoneGeometries[Math.floor(seeded(n + 3) * flagstoneGeometries.length)],
+      stoneMaterials[Math.floor(seeded(n + 4) * stoneMaterials.length)],
+    );
+    const size = 0.72 + seeded(n + 5) * 0.12;
+    stone.scale.set(size * (0.92 + seeded(n + 6) * 0.2), 1, size * (0.92 + seeded(n + 7) * 0.2));
+    stone.rotation.y = seeded(n + 8) * Math.PI * 2;
+    // A hair of difference in height so touching stones never flicker.
+    stone.position.set(x, GROUND_Y + seeded(n + 9) * 0.006, z);
+    scene.add(stone);
+  }
+}
+
+// Where u is on the loop: along each of the four sides in turn.
+function loopPoint(u) {
+  const along = (((u % 1) + 1) % 1) * 4;
+  const side = Math.floor(along);
+  const t = (along - side) * 2 - 1;
+  if (side === 0) return { x: t * LOOP_HALF, z: -LOOP_HALF };
+  if (side === 1) return { x: LOOP_HALF, z: t * LOOP_HALF };
+  if (side === 2) return { x: -t * LOOP_HALF, z: LOOP_HALF };
+  return { x: -LOOP_HALF, z: -t * LOOP_HALF };
+}
+
+// The point on the loop nearest to somewhere on the ground.
+function nearestLoopU(x, z) {
+  const clamp = (v) => Math.min(Math.max(v / LOOP_HALF, -1), 1);
+  const candidates = [
+    { t: clamp(x), side: 0, px: clamp(x) * LOOP_HALF, pz: -LOOP_HALF },
+    { t: clamp(z), side: 1, px: LOOP_HALF, pz: clamp(z) * LOOP_HALF },
+    { t: clamp(-x), side: 2, px: -clamp(-x) * LOOP_HALF, pz: LOOP_HALF },
+    { t: clamp(-z), side: 3, px: -LOOP_HALF, pz: -clamp(-z) * LOOP_HALF },
+  ];
+  let best = candidates[0];
+  let bestDistance = Infinity;
+  for (const candidate of candidates) {
+    const distance = (candidate.px - x) ** 2 + (candidate.pz - z) ** 2;
+    if (distance < bestDistance) {
+      best = candidate;
+      bestDistance = distance;
+    }
+  }
+  return ((best.side + (best.t + 1) / 2) / 4) % 1;
+}
+
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.copy(CAMERA_TARGET);
 controls.enableDamping = true;
@@ -543,11 +650,11 @@ function updateViewOffset() {
   const shiftX = narrow || !open ? 0 : rect.right / 2;
   const shiftY = narrow ? rect.height / 2 : 0;
 
-  // The bed is about 0.9 of the window's height wide at full zoom, so if the
+  // The bed and the path round it are about 1.2 of the window's height wide at full zoom, so if the
   // part of the window the panel leaves free is narrower than that (a phone
   // held upright, or a tablet with the panel open), pull the view back to fit.
   const freeWidth = width - shiftX * 2;
-  camera.zoom = Math.min(1, freeWidth / (0.92 * height));
+  camera.zoom = Math.min(1, freeWidth / (1.2 * height));
   camera.setViewOffset(width, height, -shiftX, shiftY, width, height);
 }
 
@@ -953,6 +1060,168 @@ function applyPlot(plot) {
   if (hoveredPosition === plot.position) refreshStatusBarForHover(plot);
 }
 
+// Little gardeners: one figure for each gardener online, walking along the loop
+// round the bed and never on the plots. A figure's place is only for show: it
+// limits nothing anyone can do to a plot. The server only relays where a figure
+// is and where it is going; each browser does the walking itself, so there is no
+// per-frame traffic and two browsers can differ by a fraction of a second.
+const WALK_SPEED = 0.055; // fractions of the loop a second: about 1.6 units, a lap in 18s
+const figures = new Map(); // public id -> { group, u, target, heading, phase, ... }
+
+const FIGURE_BODY = new THREE.CylinderGeometry(0.1, 0.15, 0.42, 8);
+const FIGURE_HEAD = new THREE.SphereGeometry(0.12, 8, 6);
+const FIGURE_BRIM = new THREE.CylinderGeometry(0.23, 0.23, 0.02, 10);
+const FIGURE_CROWN = new THREE.CylinderGeometry(0.1, 0.13, 0.1, 8);
+const FIGURE_SHADOW = new THREE.CircleGeometry(0.2, 12);
+const FIGURE_MARKER = new THREE.ConeGeometry(0.08, 0.16, 6).rotateX(Math.PI);
+const skinMaterial = flatMaterial(0xf2c9a0);
+const strawMaterial = flatMaterial(0xe8c872);
+const shadowMaterial = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25, depthWrite: false });
+
+function createFigure(id, u) {
+  const group = new THREE.Group();
+  const bodyMaterial = flatMaterial(colourFor(id));
+  const body = new THREE.Mesh(FIGURE_BODY, bodyMaterial);
+  body.position.y = 0.21;
+  const head = new THREE.Mesh(FIGURE_HEAD, skinMaterial);
+  head.position.y = 0.54;
+  const brim = new THREE.Mesh(FIGURE_BRIM, strawMaterial);
+  brim.position.y = 0.64;
+  const crown = new THREE.Mesh(FIGURE_CROWN, strawMaterial);
+  crown.position.y = 0.7;
+  const shadow = new THREE.Mesh(FIGURE_SHADOW, shadowMaterial);
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.006;
+  group.add(body, head, brim, crown, shadow);
+
+  const ownMaterials = [bodyMaterial];
+  let marker = null;
+  if (id === me) {
+    // A little gold arrow bobbing over your own figure, so you can find yourself.
+    const markerMaterial = new THREE.MeshBasicMaterial({ color: 0xffd23f });
+    marker = new THREE.Mesh(FIGURE_MARKER, markerMaterial);
+    marker.position.y = 1.05;
+    group.add(marker);
+    ownMaterials.push(markerMaterial);
+  }
+
+  scene.add(group);
+  const figure = { group, body, marker, ownMaterials, u, target: u, heading: 1, phase: Math.random() * 6.28 };
+  figures.set(id, figure);
+  return figure;
+}
+
+function removeFigure(id) {
+  const figure = figures.get(id);
+  if (!figure) return;
+  scene.remove(figure.group);
+  for (const material of figure.ownMaterials) material.dispose();
+  figures.delete(id);
+}
+
+// Shortest way round the loop from a to b: -0.5 up to but not including 0.5.
+function loopDifference(a, b) {
+  return ((b - a + 1.5) % 1) - 0.5;
+}
+
+function setGardener(gardener) {
+  const existing = figures.get(gardener.id);
+  // Your own figure is yours to move: an echo of an earlier click arriving after
+  // a later one would only make it jerk back.
+  if (existing && gardener.id === me) return;
+
+  const figure = existing ?? createFigure(gardener.id, gardener.u);
+  figure.target = gardener.target;
+  if (existing && Math.abs(loopDifference(figure.u, gardener.u)) > 0.03) figure.u = gardener.u;
+}
+
+function setPresence(gardeners) {
+  const here = new Set(gardeners.map((gardener) => gardener.id));
+  for (const id of [...figures.keys()]) if (!here.has(id)) removeFigure(id);
+  for (const gardener of gardeners) setGardener(gardener);
+  renderWhoIsHere();
+}
+
+const whoDots = document.getElementById("who-dots");
+const whoCount = document.getElementById("who-count");
+
+function renderWhoIsHere() {
+  const ids = [...figures.keys()].sort((a, b) => (a === me ? -1 : b === me ? 1 : a.localeCompare(b)));
+  whoDots.replaceChildren(
+    ...ids.map((id) => {
+      const dot = document.createElement("span");
+      dot.className = id === me ? "chip chip-you" : "chip";
+      dot.style.background = `#${colourFor(id).getHexString()}`;
+      dot.title = id === me ? "You" : "Another gardener";
+      return dot;
+    }),
+  );
+  const others = ids.length - (figures.has(me) ? 1 : 0);
+  whoCount.textContent =
+    others === 0 ? "Just you here" : `You and ${others} other gardener${others === 1 ? "" : "s"}`;
+}
+
+let lastFigureTime = performance.now();
+
+function updateFigures(now) {
+  const dt = Math.min((now - lastFigureTime) / 1000, 0.1);
+  lastFigureTime = now;
+  const t = now / 1000;
+
+  for (const figure of figures.values()) {
+    const diff = loopDifference(figure.u, figure.target);
+    const walking = Math.abs(diff) > 0.0005;
+    if (walking) {
+      figure.heading = Math.sign(diff);
+      figure.u = (figure.u + figure.heading * Math.min(Math.abs(diff), WALK_SPEED * dt) + 1) % 1;
+    }
+
+    const here = loopPoint(figure.u);
+    if (walking) {
+      const ahead = loopPoint(figure.u + figure.heading * 0.002);
+      figure.group.rotation.y = Math.atan2(ahead.x - here.x, ahead.z - here.z);
+    }
+    // A little bounce and sway while walking, standing still on arriving.
+    const step = Math.sin(t * 10 + figure.phase);
+    figure.group.position.set(here.x, PATH_TOP + (walking ? Math.abs(step) * 0.05 : 0), here.z);
+    figure.body.rotation.z = walking ? step * 0.08 : 0;
+    if (figure.marker) figure.marker.position.y = 1.05 + Math.sin(t * 3) * 0.05;
+  }
+}
+
+// Tell the others where your figure is and where it is going. The server drops
+// anything faster than about one a tenth of a second, so hold back until then.
+let lastPresenceSent = 0;
+let presenceTimer = null;
+
+function sendPresence() {
+  const mine = figures.get(me);
+  if (!mine) return;
+  const wait = 110 - (Date.now() - lastPresenceSent);
+  if (wait > 0) {
+    if (!presenceTimer) {
+      presenceTimer = setTimeout(() => {
+        presenceTimer = null;
+        sendPresence();
+      }, wait);
+    }
+    return;
+  }
+  lastPresenceSent = Date.now();
+  fetch("/api/presence", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ u: mine.u, target: mine.target }),
+  }).catch(() => {});
+}
+
+function walkTo(u) {
+  const mine = figures.get(me);
+  if (!mine) return;
+  mine.target = u;
+  sendPresence();
+}
+
 function connect() {
   const source = new EventSource("/events");
   source.addEventListener("hello", (event) => {
@@ -968,10 +1237,20 @@ function connect() {
   source.addEventListener("update", (event) => {
     applyPlot(JSON.parse(event.data));
   });
+  source.addEventListener("presence", (event) => setPresence(JSON.parse(event.data)));
+  source.addEventListener("presence-update", (event) => {
+    setGardener(JSON.parse(event.data));
+    renderWhoIsHere();
+  });
+  source.addEventListener("presence-leave", (event) => {
+    removeFigure(JSON.parse(event.data).id);
+    renderWhoIsHere();
+  });
 }
 connect();
 
 const raycaster = new THREE.Raycaster();
+const GROUND_PLANE = new THREE.Plane(new THREE.Vector3(0, 1, 0), -GROUND_Y);
 
 function ndcFromEvent(event) {
   const rect = renderer.domElement.getBoundingClientRect();
@@ -984,9 +1263,19 @@ function ndcFromEvent(event) {
 async function handlePointerClick(event) {
   raycaster.setFromCamera(ndcFromEvent(event), camera);
   const hit = raycaster.intersectObjects(soilMeshes, false)[0];
-  if (!hit) return;
+  if (!hit) {
+    // Not a plot: a click on the grass or the path sends your figure to the
+    // nearest point on the path.
+    const point = new THREE.Vector3();
+    if (raycaster.ray.intersectPlane(GROUND_PLANE, point)) walkTo(nearestLoopU(point.x, point.z));
+    return;
+  }
 
   const position = hit.object.userData.position;
+  // Clicking a plot still acts on it, and your figure walks round to the path
+  // beside it, where others can watch you tend it.
+  const plotSpot = worldPosition(position);
+  walkTo(nearestLoopU(plotSpot.x, plotSpot.z));
   const state = plots.get(position)?.state ?? "empty";
   const action = actionFor(state);
 
@@ -1051,6 +1340,7 @@ function animate() {
   updateClouds(serverNow() / 1000);
   updateInsects(serverNow() / 1000);
   updateDrops(now);
+  updateFigures(now);
   renderer.render(scene, camera);
 }
 animate();

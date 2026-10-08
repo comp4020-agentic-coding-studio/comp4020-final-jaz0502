@@ -22,6 +22,11 @@ export function renderPage(): string {
         <button type="button" role="radio" aria-checked="false" data-type="flower"><span class="chip chip-flower"></span>Flower</button>
         <button type="button" role="radio" aria-checked="false" data-type="shrub"><span class="chip chip-shrub"></span>Flower shrub</button>
       </div>
+      <div id="who-is-here">
+        <p class="panel-label">Who's here</p>
+        <div id="who-dots"></div>
+        <p id="who-count">Just you here</p>
+      </div>
       <p class="panel-help">A shared garden: anyone can plant an empty plot, and anyone can water any plot. Drag to look around and click a plot to act on it. The ring around a plant shows who watered it last, and it pulses when the plant gets thirsty.</p>
       <p class="panel-link"><a href="/readme/">About this app</a></p>
     </div>
