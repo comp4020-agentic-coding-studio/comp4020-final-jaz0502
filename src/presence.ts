@@ -16,11 +16,14 @@ export interface Gardener {
 interface Entry extends Gardener {
   connections: number;
   lastMoveAt: number;
+  lastWaveAt: number;
 }
 
 // One browser asking to move more than this often is dropped, and the table is
 // capped, so a stranger cannot flood a small machine with figures or messages.
 export const MIN_MOVE_GAP_MS = 100;
+// A wave is a hello, not a message to spam the garden with.
+export const MIN_WAVE_GAP_MS = 1500;
 const MAX_GARDENERS = 200;
 
 const gardeners = new Map<string, Entry>();
@@ -50,7 +53,7 @@ export function connect(id: string): Gardener | null {
   if (gardeners.size >= MAX_GARDENERS) return null;
 
   const u = spawnPoint(id);
-  gardeners.set(id, { id, u, target: u, connections: 1, lastMoveAt: 0 });
+  gardeners.set(id, { id, u, target: u, connections: 1, lastMoveAt: 0, lastWaveAt: 0 });
   return { id, u, target: u };
 }
 
@@ -84,4 +87,16 @@ export function move(id: string, body: unknown, now: number): MoveResult {
   entry.target = target;
   entry.lastMoveAt = now;
   return { ok: true, gardener: { id, u, target } };
+}
+
+export type WaveResult = { ok: true } | { ok: false; reason: "not-connected" | "too-fast" };
+
+// A gardener waves. Nothing is stored about it beyond when they last did, so
+// they can't wave again too soon: waves are never counted, ranked or kept.
+export function wave(id: string, now: number): WaveResult {
+  const entry = gardeners.get(id);
+  if (!entry) return { ok: false, reason: "not-connected" };
+  if (now - entry.lastWaveAt < MIN_WAVE_GAP_MS) return { ok: false, reason: "too-fast" };
+  entry.lastWaveAt = now;
+  return { ok: true };
 }

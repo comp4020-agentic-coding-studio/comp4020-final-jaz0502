@@ -3,9 +3,9 @@ import * as db from "./db.ts";
 import { DAY_LENGTH_MS, WILT_WINDOW_MS, derivePlot, isPlantType } from "./garden.ts";
 import { getOrSetIdentity, publicId } from "./identity.ts";
 import { renderPage } from "./page.ts";
-import { move as moveGardener } from "./presence.ts";
+import { move as moveGardener, wave as waveGardener } from "./presence.ts";
 import { renderReadme } from "./readme.ts";
-import { broadcastPresenceUpdate, broadcastUpdate, subscribe } from "./realtime.ts";
+import { broadcastPresenceUpdate, broadcastUpdate, broadcastWave, subscribe } from "./realtime.ts";
 import { serveStatic } from "./static.ts";
 import type { PlantType, Plot } from "./types.ts";
 
@@ -154,6 +154,27 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
       return;
     }
     broadcastPresenceUpdate(result.gardener);
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  // A gardener waves hello. Everyone sees it, nothing is kept or counted, and like
+  // everything about a figure it limits nothing anyone can do to a plot.
+  if (req.method === "POST" && pathname === "/api/wave") {
+    const id = publicId(identity);
+    const result = waveGardener(id, Date.now());
+    if (!result.ok) {
+      const status = result.reason === "not-connected" ? 409 : 429;
+      const error =
+        result.reason === "not-connected"
+          ? "Not connected: open the garden's event stream first"
+          : "Too many waves: give it a moment";
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error }));
+      return;
+    }
+    broadcastWave(id);
     res.writeHead(204);
     res.end();
     return;

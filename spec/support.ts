@@ -199,3 +199,12 @@ export async function postPresence(url: string, gid: string, body: unknown): Pro
   });
   return res.status;
 }
+
+// A visitor waves.
+export async function postWave(url: string, gid: string): Promise<number> {
+  const res = await fetch(new URL("/api/wave", url), {
+    method: "POST",
+    headers: { cookie: `gid=${gid}`, ...fresh },
+  });
+  return res.status;
+}

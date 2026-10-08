@@ -21,7 +21,9 @@ type SseEvent =
   // arriving or moving, or leaving. Public ids only.
   | { type: "presence"; gardeners: Gardener[] }
   | { type: "presence-update"; gardener: Gardener }
-  | { type: "presence-leave"; id: string };
+  | { type: "presence-leave"; id: string }
+  // A gardener waved. Only who, and only for everyone to see: it is not stored.
+  | { type: "wave"; id: string };
 
 // Env-overridable (short in tests) so growth/wilt transitions reach idle-but
 // -open tabs without anyone acting. This is purely a liveliness convenience,
@@ -49,6 +51,8 @@ function payloadOf(event: SseEvent): unknown {
     case "presence-update":
       return event.gardener;
     case "presence-leave":
+      return { id: event.id };
+    case "wave":
       return { id: event.id };
   }
 }
@@ -103,6 +107,10 @@ export function broadcastUpdate(plot: Plot): void {
 
 export function broadcastPresenceUpdate(gardener: Gardener): void {
   broadcast({ type: "presence-update", gardener });
+}
+
+export function broadcastWave(id: string): void {
+  broadcast({ type: "wave", id });
 }
 
 export function clientCount(): number {
