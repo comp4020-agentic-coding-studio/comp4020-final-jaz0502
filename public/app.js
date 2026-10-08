@@ -790,6 +790,136 @@ function updateDrops(now) {
   }
 }
 
+// Action badges: when anyone plants, waters or composts a plot, a small round icon
+// floats up above that plot and fades, in the colour of whoever did it, so you can
+// see what people are doing without watching their figures. Like the drops, it
+// plays from the plot's own update, so it shows in every open tab, including for
+// people who didn't click. Composting clears who tended the plot, so it has no
+// gardener's colour to use and is drawn in earth brown.
+const BADGE_MS = 2200;
+const BADGE_HEIGHT = 1.2;
+const BADGE_RISE = 0.4;
+const badgeTextures = new Map();
+const badges = [];
+
+// An icon for each action, drawn on a canvas: a round white badge with a ring in
+// the gardener's colour and the picture inside.
+function badgeTexture(action, colour) {
+  const key = `${action}-${colour.getHexString()}`;
+  let texture = badgeTextures.get(key);
+  if (texture) return texture;
+
+  const size = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  // The ring is always the gardener's colour, so you can see who did it. The
+  // picture inside is too, except a seedling, which is green.
+  const ring = `#${colour.getHexString()}`;
+  const ink = action === "plant" ? "#3f9a3a" : ring;
+
+  ctx.fillStyle = "rgba(255,255,255,0.95)";
+  ctx.beginPath();
+  ctx.arc(64, 64, 58, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.lineWidth = 8;
+  ctx.strokeStyle = ring;
+  ctx.stroke();
+
+  ctx.fillStyle = ink;
+  ctx.strokeStyle = ink;
+  ctx.lineCap = "round";
+  if (action === "water") {
+    // a drop: a round bottom with a point on top
+    ctx.beginPath();
+    ctx.arc(64, 74, 22, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(64, 24);
+    ctx.lineTo(43, 66);
+    ctx.lineTo(85, 66);
+    ctx.closePath();
+    ctx.fill();
+  } else if (action === "plant") {
+    // a seedling: a stem with a leaf each side
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(64, 98);
+    ctx.lineTo(64, 56);
+    ctx.stroke();
+    for (const [x, y, angle] of [
+      [49, 56, -0.6],
+      [79, 46, 0.6],
+    ]) {
+      ctx.beginPath();
+      ctx.ellipse(x, y, 17, 8, angle, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else {
+    // a spade: a handle with a grip, and a blade
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(64, 26);
+    ctx.lineTo(64, 66);
+    ctx.moveTo(52, 26);
+    ctx.lineTo(76, 26);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(46, 66);
+    ctx.lineTo(82, 66);
+    ctx.lineTo(74, 94);
+    ctx.quadraticCurveTo(64, 104, 54, 94);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  texture = new THREE.CanvasTexture(canvas);
+  // The canvas holds ordinary sRGB colours; say so, or they come out washed out.
+  texture.colorSpace = THREE.SRGBColorSpace;
+  badgeTextures.set(key, texture);
+  return texture;
+}
+
+function showActionBadge(position, action, doneBy) {
+  const obj = sceneObjects.get(position);
+  // A newer action on the same plot replaces the one still floating there.
+  for (let i = badges.length - 1; i >= 0; i--) {
+    if (badges[i].position === position) removeBadge(i);
+  }
+
+  const colour = doneBy ? colourFor(doneBy) : new THREE.Color(0x7a5a3a);
+  const material = new THREE.SpriteMaterial({ map: badgeTexture(action, colour), transparent: true });
+  const sprite = new THREE.Sprite(material);
+  sprite.position.set(0, BADGE_HEIGHT, 0);
+  sprite.scale.setScalar(0.01);
+  obj.group.add(sprite);
+  badges.push({ position, sprite, material, parent: obj.group, start: performance.now() });
+}
+
+function removeBadge(index) {
+  const badge = badges[index];
+  badge.parent.remove(badge.sprite);
+  badge.material.dispose();
+  badges.splice(index, 1);
+}
+
+function updateBadges(now) {
+  for (let i = badges.length - 1; i >= 0; i--) {
+    const badge = badges[i];
+    const t = (now - badge.start) / BADGE_MS;
+    if (t >= 1) {
+      removeBadge(i);
+      continue;
+    }
+    // Pops in with a little overshoot, drifts up, and fades over the last stretch.
+    const pop = Math.min(t / 0.1, 1);
+    const overshoot = 1 + 0.3 * Math.sin(pop * Math.PI);
+    badge.sprite.scale.setScalar(0.55 * pop * overshoot);
+    badge.sprite.position.y = BADGE_HEIGHT + BADGE_RISE * t;
+    badge.material.opacity = t < 0.65 ? 1 : 1 - (t - 0.65) / 0.35;
+  }
+}
+
 function triggerWaterEffect(position, wateredBy) {
   waterAnimations.set(position, { start: performance.now() });
   spawnDrops(position, wateredBy);
@@ -1054,9 +1184,19 @@ function applyPlot(plot) {
   const wateredChanged =
     Boolean(prev) && plot.lastWateredAt !== null && (prev.lastWateredAt === null || plot.lastWateredAt > prev.lastWateredAt);
 
+  // What someone just did, read from how the plot changed. Nothing on the first
+  // snapshot, and nothing when a plot merely grew or wilted by itself.
+  let action = null;
+  if (prev) {
+    if (prev.state === "empty" && plot.state !== "empty") action = "plant";
+    else if (prev.state !== "empty" && plot.state === "empty") action = "compost";
+    else if (wateredChanged) action = "water";
+  }
+
   plots.set(plot.position, plot);
   if (stateChanged) rebuildPlant(plot.position, plot.plantType ?? "tree", plot.state);
   if (wateredChanged) triggerWaterEffect(plot.position, plot.lastWateredBy);
+  if (action) showActionBadge(plot.position, action, plot.lastWateredBy);
   if (hoveredPosition === plot.position) refreshStatusBarForHover(plot);
 }
 
@@ -1340,6 +1480,7 @@ function animate() {
   updateClouds(serverNow() / 1000);
   updateInsects(serverNow() / 1000);
   updateDrops(now);
+  updateBadges(now);
   updateFigures(now);
   renderer.render(scene, camera);
 }
