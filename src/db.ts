@@ -120,3 +120,55 @@ export function compost(position: number): Plot | undefined {
   compostStmt.run(BED_ID, position);
   return getPlot(position);
 }
+
+// What each gardener has done, kept as a plain record for them and nobody else.
+// It is a new table, so on the live volume CREATE TABLE IF NOT EXISTS simply adds
+// it and nothing already there is touched. It is keyed by the public id, so the
+// cookie never goes into it. Counting starts from when this shipped: there is no
+// history of earlier actions to count from.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS gardener_stats (
+    id        TEXT    PRIMARY KEY,
+    planted   INTEGER NOT NULL DEFAULT 0,
+    watered   INTEGER NOT NULL DEFAULT 0,
+    composted INTEGER NOT NULL DEFAULT 0,
+    since     INTEGER NOT NULL
+  );
+`);
+
+export interface GardenerStats {
+  planted: number;
+  watered: number;
+  composted: number;
+  // When their first counted action was, or null if they haven't done one.
+  since: number | null;
+}
+
+// A row appears on someone's first action, and only this many gardeners are
+// counted, so a stranger minting cookies can't grow the database without limit.
+// Past it, new gardeners simply aren't counted.
+const MAX_COUNTED_GARDENERS = Number(process.env.MAX_COUNTED_GARDENERS ?? 5000);
+
+const statsStmt = db.prepare("SELECT planted, watered, composted, since FROM gardener_stats WHERE id = ?");
+const countStmt = db.prepare("SELECT COUNT(*) AS n FROM gardener_stats");
+const createStatsStmt = db.prepare("INSERT OR IGNORE INTO gardener_stats (id, since) VALUES (?, ?)");
+const bumpStmts = {
+  plant: db.prepare("UPDATE gardener_stats SET planted = planted + 1 WHERE id = ?"),
+  water: db.prepare("UPDATE gardener_stats SET watered = watered + 1 WHERE id = ?"),
+  compost: db.prepare("UPDATE gardener_stats SET composted = composted + 1 WHERE id = ?"),
+};
+
+export function getStats(id: string): GardenerStats {
+  const row = statsStmt.get(id) as unknown as GardenerStats | undefined;
+  return row ? { ...row } : { planted: 0, watered: 0, composted: 0, since: null };
+}
+
+export function recordAction(id: string, action: "plant" | "water" | "compost", now: number): GardenerStats {
+  if (!statsStmt.get(id)) {
+    const { n } = countStmt.get() as unknown as { n: number };
+    if (n >= MAX_COUNTED_GARDENERS) return getStats(id);
+    createStatsStmt.run(id, now);
+  }
+  bumpStmts[action].run(id);
+  return getStats(id);
+}

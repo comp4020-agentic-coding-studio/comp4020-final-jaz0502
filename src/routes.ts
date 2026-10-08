@@ -5,7 +5,7 @@ import { getOrSetIdentity, publicId } from "./identity.ts";
 import { renderPage } from "./page.ts";
 import { move as moveGardener, wave as waveGardener } from "./presence.ts";
 import { renderReadme } from "./readme.ts";
-import { broadcastPresenceUpdate, broadcastUpdate, broadcastWave, subscribe } from "./realtime.ts";
+import { broadcastPresenceUpdate, broadcastUpdate, broadcastWave, sendStats, subscribe } from "./realtime.ts";
 import { serveStatic } from "./static.ts";
 import type { PlantType, Plot } from "./types.ts";
 
@@ -133,6 +133,7 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
         serverNow: Date.now(),
       },
       publicId(identity),
+      db.getStats(publicId(identity)),
     );
     return;
   }
@@ -207,6 +208,10 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
           : handleCompost(position);
 
     if (result) {
+      // A plain record for the one who did it, kept by public id and sent to their
+      // own streams only.
+      sendStats(publicId(identity), db.recordAction(publicId(identity), action, Date.now()));
+
       const publicResult = toPublic(result);
       broadcastUpdate(publicResult);
       res.writeHead(200, { "content-type": "application/json" });

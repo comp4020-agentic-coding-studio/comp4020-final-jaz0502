@@ -1,4 +1,5 @@
 import type { ServerResponse } from "node:http";
+import type { GardenerStats } from "./db.ts";
 import { type Gardener, connect, disconnect, listGardeners } from "./presence.ts";
 import type { Plot, PlotState } from "./types.ts";
 
@@ -23,7 +24,10 @@ type SseEvent =
   | { type: "presence-update"; gardener: Gardener }
   | { type: "presence-leave"; id: string }
   // A gardener waved. Only who, and only for everyone to see: it is not stored.
-  | { type: "wave"; id: string };
+  | { type: "wave"; id: string }
+  // Your own record of what you have done. Sent to that gardener's streams only,
+  // never broadcast: nobody else is ever shown your counts.
+  | { type: "stats"; stats: GardenerStats };
 
 // Env-overridable (short in tests) so growth/wilt transitions reach idle-but
 // -open tabs without anyone acting. This is purely a liveliness convenience,
@@ -32,6 +36,10 @@ type SseEvent =
 const SWEEP_INTERVAL_MS = Number(process.env.SWEEP_INTERVAL_MS ?? 30_000);
 
 const clients = new Set<ServerResponse>();
+
+// Which gardener each open stream belongs to, so something meant for one person
+// can be sent to their streams alone.
+const gardenerOf = new Map<ServerResponse, string>();
 
 // The last state each connected set of clients was actually sent, so the
 // sweep can broadcast only plots whose derived state changed since the last
@@ -54,6 +62,8 @@ function payloadOf(event: SseEvent): unknown {
       return { id: event.id };
     case "wave":
       return { id: event.id };
+    case "stats":
+      return event.stats;
   }
 }
 
@@ -75,6 +85,7 @@ export function subscribe(
   initialSnapshot: Plot[],
   hello: Hello,
   gardenerId: string,
+  stats: GardenerStats,
 ): void {
   res.writeHead(200, {
     "content-type": "text/event-stream",
@@ -89,13 +100,16 @@ export function subscribe(
   if (arrived) broadcast({ type: "presence-update", gardener: arrived });
 
   clients.add(res);
+  gardenerOf.set(res, gardenerId);
   for (const plot of initialSnapshot) lastKnownState.set(plot.position, plot.state);
   write(res, { type: "hello", hello });
   write(res, { type: "snapshot", plots: initialSnapshot });
   write(res, { type: "presence", gardeners: listGardeners() });
+  write(res, { type: "stats", stats });
 
   res.on("close", () => {
     clients.delete(res);
+    gardenerOf.delete(res);
     if (disconnect(gardenerId)) broadcast({ type: "presence-leave", id: gardenerId });
   });
 }
@@ -107,6 +121,14 @@ export function broadcastUpdate(plot: Plot): void {
 
 export function broadcastPresenceUpdate(gardener: Gardener): void {
   broadcast({ type: "presence-update", gardener });
+}
+
+// Send a gardener their own record, to every stream they have open and to no one
+// else's.
+export function sendStats(gardenerId: string, stats: GardenerStats): void {
+  for (const [res, id] of gardenerOf) {
+    if (id === gardenerId) write(res, { type: "stats", stats });
+  }
 }
 
 export function broadcastWave(id: string): void {
