@@ -633,9 +633,11 @@ controls.minDistance = 4;
 controls.maxDistance = 14;
 controls.maxPolarAngle = Math.PI / 2 - 0.05;
 
-const panel = document.getElementById("panel");
+const panels = document.getElementById("panels");
 const panelToggle = document.getElementById("panel-toggle");
 const panelBody = document.getElementById("panel-body");
+const gardenerToggle = document.getElementById("gardener-toggle");
+const gardenerBody = document.getElementById("gardener-body");
 
 // The panel covers part of the garden, so slide the view over until the bed
 // sits in the middle of the part you can still see. On a wide window the panel
@@ -643,10 +645,11 @@ const panelBody = document.getElementById("panel-body");
 function updateViewOffset() {
   const width = container.clientWidth;
   const height = container.clientHeight;
-  const rect = panel.getBoundingClientRect();
+  const rect = panels.getBoundingClientRect();
   const narrow = window.matchMedia("(max-width: 700px)").matches;
-  // Collapsed, the panel is only a small pill in the corner: nothing to avoid.
-  const open = !panelBody.hidden;
+  // With both panels collapsed they are only small pills in the corner: nothing
+  // to avoid.
+  const open = !panelBody.hidden || !gardenerBody.hidden;
   const shiftX = narrow || !open ? 0 : rect.right / 2;
   const shiftY = narrow ? rect.height / 2 : 0;
 
@@ -668,13 +671,27 @@ function onResize() {
 window.addEventListener("resize", onResize);
 onResize();
 
+function setPanelOpen(button, body, open) {
+  body.hidden = !open;
+  button.setAttribute("aria-expanded", String(open));
+  button.textContent = open ? "Hide" : "Show";
+}
+
 panelToggle.addEventListener("click", () => {
-  const opening = panelBody.hidden;
-  panelBody.hidden = !opening;
-  panelToggle.setAttribute("aria-expanded", String(opening));
-  panelToggle.textContent = opening ? "Hide" : "Show";
+  setPanelOpen(panelToggle, panelBody, panelBody.hidden);
   updateViewOffset();
 });
+
+gardenerToggle.addEventListener("click", () => {
+  setPanelOpen(gardenerToggle, gardenerBody, gardenerBody.hidden);
+  updateViewOffset();
+});
+
+// Room is tight on a phone, so your own panel starts closed there.
+if (window.matchMedia("(max-width: 700px)").matches) {
+  setPanelOpen(gardenerToggle, gardenerBody, false);
+  updateViewOffset();
+}
 
 // position -> { group, soilMesh, plantGroup, baseSoilColor }
 const sceneObjects = new Map();
@@ -1434,6 +1451,28 @@ function walkTo(u) {
   sendPresence();
 }
 
+// Your own panel: your colour and a plain record of what you have done. The
+// record comes from the server and is only ever sent to you.
+const youChip = document.getElementById("you-chip");
+const youSince = document.getElementById("you-since");
+const countElements = {
+  planted: document.getElementById("count-planted"),
+  watered: document.getElementById("count-watered"),
+  composted: document.getElementById("count-composted"),
+};
+
+function renderYou() {
+  if (me) youChip.style.background = `#${colourFor(me).getHexString()}`;
+}
+
+function renderStats(stats) {
+  for (const [name, element] of Object.entries(countElements)) element.textContent = String(stats[name]);
+  youSince.textContent =
+    stats.since === null
+      ? "Your record starts with your first action"
+      : `Tending since ${new Date(stats.since).toLocaleDateString(undefined, { day: "numeric", month: "short" })}`;
+}
+
 function connect() {
   const source = new EventSource("/events");
   source.addEventListener("hello", (event) => {
@@ -1442,6 +1481,7 @@ function connect() {
     wiltWindowMs = hello.wiltWindowMs;
     dayLengthMs = hello.dayLengthMs;
     clockOffset = hello.serverNow - Date.now();
+    renderYou();
   });
   source.addEventListener("snapshot", (event) => {
     for (const plot of JSON.parse(event.data)) applyPlot(plot);
@@ -1459,6 +1499,7 @@ function connect() {
     renderWhoIsHere();
   });
   source.addEventListener("wave", (event) => waveFigure(JSON.parse(event.data).id));
+  source.addEventListener("stats", (event) => renderStats(JSON.parse(event.data)));
 }
 connect();
 
