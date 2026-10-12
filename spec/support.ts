@@ -21,6 +21,8 @@ const fresh = { connection: "close" };
 
 export interface PrivateApp {
   url: string;
+  // Everything the server has written to its log so far, one string per line.
+  logs: () => string[];
   stop: () => Promise<void>;
 }
 
@@ -46,10 +48,12 @@ export async function startApp(env: Record<string, string>): Promise<PrivateApp>
       SWEEP_INTERVAL_MS: "60000",
       ...env,
     },
-    stdio: ["ignore", "ignore", "pipe"],
+    stdio: ["ignore", "pipe", "pipe"],
   });
   let stderr = "";
   child.stderr.on("data", (chunk) => (stderr += chunk));
+  let stdout = "";
+  child.stdout.on("data", (chunk) => (stdout += chunk));
 
   const url = `http://127.0.0.1:${port}`;
   for (let attempt = 0; ; attempt++) {
@@ -66,6 +70,7 @@ export async function startApp(env: Record<string, string>): Promise<PrivateApp>
 
   return {
     url,
+    logs: () => stdout.split("\n").filter((line) => line !== ""),
     stop: async () => {
       const exited = new Promise((resolve) => child.once("exit", resolve));
       child.kill();

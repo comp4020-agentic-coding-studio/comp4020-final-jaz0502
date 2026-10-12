@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import * as db from "./db.ts";
 import { DAY_LENGTH_MS, WILT_WINDOW_MS, derivePlot, isPlantType } from "./garden.ts";
 import { getOrSetIdentity, publicId } from "./identity.ts";
+import { logEvent } from "./log.ts";
 import { renderPage } from "./page.ts";
 import { move as moveGardener, wave as waveGardener } from "./presence.ts";
 import { renderReadme } from "./readme.ts";
@@ -76,7 +77,17 @@ function handleCompost(position: number): Plot | null {
   return updated ? derivePlot(updated, Date.now()) : null;
 }
 
-const ACTION_PATTERN = /^\/api\/plots\/(\d+)\/(plant|water|compost)$/;
+// Why an action was refused, for the log, read off the plot after the fact.
+function refusalReason(position: number, action: "plant" | "water" | "compost"): string {
+  const plot = db.getPlot(position);
+  if (!plot) return "no-such-plot";
+  const { state } = derivePlot(plot, Date.now());
+  if (action === "plant") return "not-empty";
+  if (action === "water") return state === "empty" ? "empty" : "wilted";
+  return "not-wilted";
+}
+
+const ACTION_PATTERN =/^\/api\/plots\/(\d+)\/(plant|water|compost)$/;
 
 export async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const identity = getOrSetIdentity(req, res);
@@ -166,6 +177,7 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
     const id = publicId(identity);
     const result = waveGardener(id, Date.now());
     if (!result.ok) {
+      logEvent(id, "wave", { result: "refused", reason: result.reason });
       const status = result.reason === "not-connected" ? 409 : 429;
       const error =
         result.reason === "not-connected"
@@ -175,6 +187,7 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
       res.end(JSON.stringify({ error }));
       return;
     }
+    logEvent(id, "wave", { result: "ok" });
     broadcastWave(id);
     res.writeHead(204);
     res.end();
@@ -193,6 +206,7 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
       const requested =
         body === undefined ? "tree" : typeof body === "object" && body !== null ? (body as { type?: unknown }).type ?? "tree" : null;
       if (!isPlantType(requested)) {
+        logEvent(publicId(identity), "plant", { plot: position, result: "refused", reason: "unknown-type" });
         res.writeHead(400, { "content-type": "application/json" });
         res.end(JSON.stringify({ error: "Unknown plant type" }));
         return;
@@ -207,7 +221,10 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
           ? handleWater(position, identity)
           : handleCompost(position);
 
+    const who = publicId(identity);
     if (result) {
+      logEvent(who, action, { plot: position, ...(action === "plant" ? { type: plantType } : {}), result: "ok" });
+
       // A plain record for the one who did it, kept by public id and sent to their
       // own streams only.
       sendStats(publicId(identity), db.recordAction(publicId(identity), action, Date.now()));
@@ -217,6 +234,7 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(publicResult));
     } else {
+      logEvent(who, action, { plot: position, result: "refused", reason: refusalReason(position, action) });
       res.writeHead(409, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: "Conflict: action not valid for this plot's current state" }));
     }

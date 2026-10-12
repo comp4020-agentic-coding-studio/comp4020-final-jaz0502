@@ -1,5 +1,6 @@
 import type { ServerResponse } from "node:http";
 import type { GardenerStats } from "./db.ts";
+import { logEvent } from "./log.ts";
 import { type Gardener, connect, disconnect, listGardeners } from "./presence.ts";
 import type { Plot, PlotState } from "./types.ts";
 
@@ -97,7 +98,10 @@ export function subscribe(
   // connection joins the list, so they aren't told about themselves twice. A
   // second tab from someone already here isn't an arrival.
   const arrived = connect(gardenerId);
-  if (arrived) broadcast({ type: "presence-update", gardener: arrived });
+  if (arrived) {
+    broadcast({ type: "presence-update", gardener: arrived });
+    logEvent(gardenerId, "join", { gardeners: listGardeners().length });
+  }
 
   clients.add(res);
   gardenerOf.set(res, gardenerId);
@@ -110,7 +114,10 @@ export function subscribe(
   res.on("close", () => {
     clients.delete(res);
     gardenerOf.delete(res);
-    if (disconnect(gardenerId)) broadcast({ type: "presence-leave", id: gardenerId });
+    if (disconnect(gardenerId)) {
+      broadcast({ type: "presence-leave", id: gardenerId });
+      logEvent(gardenerId, "leave", { gardeners: listGardeners().length });
+    }
   });
 }
 
