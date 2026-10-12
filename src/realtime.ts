@@ -1,4 +1,5 @@
 import type { ServerResponse } from "node:http";
+import { type Activity, recentActivity } from "./activity.ts";
 import type { GardenerStats } from "./db.ts";
 import { logEvent } from "./log.ts";
 import { type Gardener, connect, disconnect, listGardeners } from "./presence.ts";
@@ -28,7 +29,11 @@ type SseEvent =
   | { type: "wave"; id: string }
   // Your own record of what you have done. Sent to that gardener's streams only,
   // never broadcast: nobody else is ever shown your counts.
-  | { type: "stats"; stats: GardenerStats };
+  | { type: "stats"; stats: GardenerStats }
+  // What gardeners have just done: the short recent list once on connect, then each
+  // new action as it happens. Public ids only.
+  | { type: "feed"; feed: Activity[] }
+  | { type: "activity"; activity: Activity };
 
 // Env-overridable (short in tests) so growth/wilt transitions reach idle-but
 // -open tabs without anyone acting. This is purely a liveliness convenience,
@@ -65,6 +70,10 @@ function payloadOf(event: SseEvent): unknown {
       return { id: event.id };
     case "stats":
       return event.stats;
+    case "feed":
+      return event.feed;
+    case "activity":
+      return event.activity;
   }
 }
 
@@ -110,6 +119,7 @@ export function subscribe(
   write(res, { type: "snapshot", plots: initialSnapshot });
   write(res, { type: "presence", gardeners: listGardeners() });
   write(res, { type: "stats", stats });
+  write(res, { type: "feed", feed: recentActivity() });
 
   res.on("close", () => {
     clients.delete(res);
@@ -136,6 +146,10 @@ export function sendStats(gardenerId: string, stats: GardenerStats): void {
   for (const [res, id] of gardenerOf) {
     if (id === gardenerId) write(res, { type: "stats", stats });
   }
+}
+
+export function broadcastActivity(activity: Activity): void {
+  broadcast({ type: "activity", activity });
 }
 
 export function broadcastWave(id: string): void {

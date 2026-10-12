@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { recordActivity } from "./activity.ts";
 import * as db from "./db.ts";
 import { DAY_LENGTH_MS, WILT_WINDOW_MS, derivePlot, isPlantType } from "./garden.ts";
 import { getOrSetIdentity, publicId } from "./identity.ts";
@@ -6,7 +7,7 @@ import { logEvent } from "./log.ts";
 import { renderPage } from "./page.ts";
 import { move as moveGardener, wave as waveGardener } from "./presence.ts";
 import { renderReadme } from "./readme.ts";
-import { broadcastPresenceUpdate, broadcastUpdate, broadcastWave, sendStats, subscribe } from "./realtime.ts";
+import { broadcastActivity, broadcastPresenceUpdate, broadcastUpdate, broadcastWave, sendStats, subscribe } from "./realtime.ts";
 import { serveStatic } from "./static.ts";
 import type { PlantType, Plot } from "./types.ts";
 
@@ -224,6 +225,9 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
     const who = publicId(identity);
     if (result) {
       logEvent(who, action, { plot: position, ...(action === "plant" ? { type: plantType } : {}), result: "ok" });
+      broadcastActivity(
+        recordActivity({ id: who, did: action, plot: position, ...(action === "plant" ? { type: plantType } : {}) }),
+      );
 
       // A plain record for the one who did it, kept by public id and sent to their
       // own streams only.
