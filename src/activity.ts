@@ -14,7 +14,7 @@ export interface Activity {
   type?: PlantType;
 }
 
-export const MAX_ACTIVITY = 8;
+export const MAX_ACTIVITY = 4;
 
 const recent: Activity[] = [];
 

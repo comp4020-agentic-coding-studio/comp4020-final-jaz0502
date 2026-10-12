@@ -638,6 +638,8 @@ const panelToggle = document.getElementById("panel-toggle");
 const panelBody = document.getElementById("panel-body");
 const gardenerToggle = document.getElementById("gardener-toggle");
 const gardenerBody = document.getElementById("gardener-body");
+const feedToggle = document.getElementById("feed-toggle");
+const feedBody = document.getElementById("feed-body");
 
 // The panel covers part of the garden, so slide the view over until the bed
 // sits in the middle of the part you can still see. On a wide window the panel
@@ -649,7 +651,7 @@ function updateViewOffset() {
   const narrow = window.matchMedia("(max-width: 700px)").matches;
   // With both panels collapsed they are only small pills in the corner: nothing
   // to avoid.
-  const open = !panelBody.hidden || !gardenerBody.hidden;
+  const open = !panelBody.hidden || !feedBody.hidden || !gardenerBody.hidden;
   const shiftX = narrow || !open ? 0 : rect.right / 2;
   const shiftY = narrow ? rect.height / 2 : 0;
 
@@ -682,13 +684,19 @@ panelToggle.addEventListener("click", () => {
   updateViewOffset();
 });
 
+feedToggle.addEventListener("click", () => {
+  setPanelOpen(feedToggle, feedBody, feedBody.hidden);
+  updateViewOffset();
+});
+
 gardenerToggle.addEventListener("click", () => {
   setPanelOpen(gardenerToggle, gardenerBody, gardenerBody.hidden);
   updateViewOffset();
 });
 
-// Room is tight on a phone, so your own panel starts closed there.
+// Room is tight on a phone, so the recent list and your own panel start closed there.
 if (window.matchMedia("(max-width: 700px)").matches) {
+  setPanelOpen(feedToggle, feedBody, false);
   setPanelOpen(gardenerToggle, gardenerBody, false);
   updateViewOffset();
 }
@@ -1473,6 +1481,37 @@ function renderStats(stats) {
       : `Tending since ${new Date(stats.since).toLocaleDateString(undefined, { day: "numeric", month: "short" })}`;
 }
 
+// The recent list: the last few things gardeners did, newest first. The server
+// keeps and sends it; this only draws it. It shows no counts and no totals.
+const FEED_LENGTH = 4;
+const feedList = document.getElementById("feed-list");
+const feedEmpty = document.getElementById("feed-empty");
+let feed = [];
+
+function feedText(entry) {
+  const who = entry.id === me ? "You" : "A gardener";
+  if (entry.did === "plant") {
+    const name = PLANT_NAME[entry.type ?? "tree"].toLowerCase();
+    return `${who} planted a ${name}`;
+  }
+  if (entry.did === "water") return `${who} watered a plant`;
+  return `${who} composted a wilted plant`;
+}
+
+function renderFeed() {
+  feedList.replaceChildren(
+    ...feed.map((entry) => {
+      const item = document.createElement("li");
+      const dot = document.createElement("span");
+      dot.className = "chip";
+      dot.style.background = `#${colourFor(entry.id).getHexString()}`;
+      item.append(dot, feedText(entry));
+      return item;
+    }),
+  );
+  feedEmpty.hidden = feed.length > 0;
+}
+
 function connect() {
   const source = new EventSource("/events");
   source.addEventListener("hello", (event) => {
@@ -1500,6 +1539,14 @@ function connect() {
   });
   source.addEventListener("wave", (event) => waveFigure(JSON.parse(event.data).id));
   source.addEventListener("stats", (event) => renderStats(JSON.parse(event.data)));
+  source.addEventListener("feed", (event) => {
+    feed = JSON.parse(event.data).slice(0, FEED_LENGTH);
+    renderFeed();
+  });
+  source.addEventListener("activity", (event) => {
+    feed = [JSON.parse(event.data), ...feed].slice(0, FEED_LENGTH);
+    renderFeed();
+  });
 }
 connect();
 

@@ -28,8 +28,22 @@ export function renderPage(): string {
         <div id="who-dots"></div>
         <p id="who-count">Just you here</p>
       </div>
-      <p class="panel-help">A shared garden: anyone can plant an empty plot, and anyone can water any plot. Drag to look around and click a plot to act on it. The ring around a plant shows who watered it last, and it pulses when the plant gets thirsty.</p>
+      <details class="panel-details">
+        <summary>How it works</summary>
+        <p class="panel-help">A shared garden: anyone can plant an empty plot, and anyone can water any plot. Drag to look around and click a plot to act on it. The ring around a plant shows who watered it last, and it pulses when the plant gets thirsty.</p>
+      </details>
       <p class="panel-link"><a href="/readme/">About this app</a></p>
+    </div>
+  </aside>
+
+  <aside id="feed-panel" class="panel" aria-label="Recent activity">
+    <div class="panel-header">
+      <h2>Recent</h2>
+      <button type="button" id="feed-toggle" class="panel-toggle" aria-expanded="true" aria-controls="feed-body">Hide</button>
+    </div>
+    <div id="feed-body" class="panel-body">
+      <ul id="feed-list" aria-live="polite"></ul>
+      <p id="feed-empty" class="feed-empty">Nothing yet. Plant something to start.</p>
     </div>
   </aside>
 
@@ -46,13 +60,15 @@ export function renderPage(): string {
           <p id="you-since" class="you-since">Your record starts with your first action</p>
         </div>
       </div>
-      <p class="panel-label you-label">Your record</p>
+      <div class="you-record-head">
+        <p class="panel-label you-label">Your record</p>
+        <button type="button" id="wave-button" aria-label="Wave hello to everyone in the garden">Wave</button>
+      </div>
       <dl id="you-counts">
         <div><dt>Planted</dt><dd id="count-planted">0</dd></div>
         <div><dt>Watered</dt><dd id="count-watered">0</dd></div>
         <div><dt>Composted</dt><dd id="count-composted">0</dd></div>
       </dl>
-      <button type="button" id="wave-button" aria-label="Wave hello to everyone in the garden">Wave</button>
     </div>
   </aside>
   </div>

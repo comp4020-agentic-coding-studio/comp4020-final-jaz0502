@@ -65,7 +65,7 @@ describe("the recent feed", () => {
 
     const late = await join(newVisitor(app.url).gid);
     const feed = late.frames.find((f) => f.event === "feed")!.data as Entry[];
-    expect(feed.map((e) => e.plot)).toEqual([9, 8, 7, 6, 5, 4, 3, 2]);
+    expect(feed.map((e) => e.plot)).toEqual([9, 8, 7, 6]);
   });
 
   it("leaves out what was refused, and waves", async () => {
