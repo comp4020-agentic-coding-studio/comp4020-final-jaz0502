@@ -56,9 +56,9 @@ it("keeps a plant from before plant types existed, as a tree with its owner", as
   expect(plot.plantedBy).toBe(publicId("old-visitor"));
 });
 
-it("gains the second bed, empty, and leaves the first bed's plots where they were", async () => {
+it("gains the other beds, empty, and leaves the first bed's plots where they were", async () => {
   const plots = await readPlots(app.url);
-  expect(plots.map((p) => p.position)).toEqual([...Array(50).keys()]);
+  expect(plots.map((p) => p.position)).toEqual([...Array(100).keys()]);
   expect(plots.filter((p) => p.position >= 25).every((p) => p.state === "empty")).toBe(true);
   expect(plots.filter((p) => p.state !== "empty").map((p) => p.position)).toEqual([3]);
 });
