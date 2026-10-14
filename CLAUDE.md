@@ -7,7 +7,7 @@ These come from `README.md`, which says what "good" means for this app. If a rul
 - Never add scoring, points, rankings or any win or lose state. The garden is a shared, collaborative space.
 - Never send a visitor's `gid` cookie to anyone. It is their whole identity. Clients only get the one-way `publicId(gid)`, and anything leaving the server goes through `toPublic()` in `src/routes.ts`. `spec/privacy.test.ts` enforces this.
 - Never let one visitor overwrite or remove another's healthy plant. Planting only works on an empty plot, and composting only on a wilted one.
-- Never put a gardener's figure on the plots. Figures walk only along the flagstone path round the bed.
+- Never put a gardener's figure on the plots. Figures walk only along the flagstone paths: the ring round each bed and the walkways between neighbouring beds.
 - Never turn a gardener's record of what they have planted, watered and composted into a score. It stays a plain record, private to them: never shown to anyone else, never compared between gardeners, and never given goals, levels, streaks, badges, achievements or targets. Word it as a record ("Planted 12"), never as an achievement.
 
 ## What a change must not break
@@ -16,7 +16,9 @@ These come from `README.md`, which says what "good" means for this app. If a rul
 - Watering resets the wilt clock, and a wilted plot cannot be watered or replanted until someone composts it.
 - A plot's stage is derived from stored timestamps by `derivePlot` in `src/garden.ts`. Never use a per-plot timer, because Fly stops the machine when it is idle. The database only stores `empty` or `planted`.
 - Live updates go over Server-Sent Events (`/events`). The page changes in response to those events, not to the POST response.
-- A figure's position is only for show. Where a gardener's figure stands never limits what anyone can do to a plot, and no action may depend on it.
+- A figure's position is only for show. Where a gardener's figure stands, or which bed they are looking at, never limits what anyone can do to a plot, and no action may depend on it.
+- The garden has four beds of 25 plots, numbered by bed: 0 to 24, 25 to 49, 50 to 74 and 75 to 99. Every bed has the same rules and plants. A bed's plots keep their numbers, so a new bed is added after the last one and never renumbers the others. `spec/plots.test.ts` and `spec/migration.test.ts` enforce this.
+- The server never knows the paths' shape. A figure is sent as `u` and `target` from 0 up to 1, and the page reads each quarter as one bed's loop. Walking between beds is worked out in the page.
 - Presence lives in memory only and is keyed by the public id, so two tabs from one browser are one gardener with one figure. A stranger's browser is a source of messages, so `POST /api/presence` stays validated, rate-limited and capped (`src/presence.ts`). `spec/presence.test.ts` enforces this.
 - A wave is a hello and nothing more. It is never stored, counted, ranked or sent to anyone in particular, and `POST /api/wave` stays validated, rate-limited, and open only to someone with the event stream open (`src/presence.ts`). `spec/wave.test.ts` enforces this.
 - A gardener's record lives in `gardener_stats`, keyed by the public id and never the cookie, and is sent only to that gardener's own streams as a `stats` event, never broadcast. Only a capped number of gardeners are counted. `spec/stats.test.ts` enforces this.

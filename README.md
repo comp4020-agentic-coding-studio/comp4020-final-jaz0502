@@ -2,7 +2,7 @@
 
 ## What "good" means
 
-For this app, "good" means that many people can be online at the same time, all working on the same shared garden. When someone plants something, it shows up in the garden for everyone, without a reload. You can also see that other people are there: each gardener is a small figure that walks the path round the garden bed, and a "Who's here" list shows how many people are online.
+For this app, "good" means that many people can be online at the same time, all working on the same shared garden. When someone plants something, it shows up in the garden for everyone, without a reload. You can also see that other people are there: each gardener is a small figure that walks the stone paths round the garden's four beds, and a "Who's here" list shows how many people are online. You can go from one bed to another by clicking it.
 
 The garden is cooperative. Anyone can plant an empty plot and anyone can water any plot, so nobody owns anything. Plants that nobody waters for some time wilt, and someone has to compost a wilted plot before anything new can grow there. The garden only stays alive because people look after it. It should not have a scoring system, a ranking, or any win or lose situation. The goal is a shared, collaborative space.
 
@@ -14,7 +14,7 @@ Each gardener also has a private record of what they have planted, watered and c
 
 There are no names or profiles chosen by gardeners, because there are no accounts and I did not want free text from strangers. Gardeners are told apart by colour alone, so two can end up with similar colours.
 
-Figures only walk along the path and never stand on a plot. Where a figure is has no effect on what anyone can do to a plot.
+Figures only walk along the paths and never stand on a plot. Where a figure is, or which bed you are looking at, has no effect on what anyone can do to a plot.
 
 Who is here is not remembered: after a restart nobody is listed and the Recent list starts empty. The plants and each gardener's record are kept.
 
@@ -26,6 +26,7 @@ Some of "good" is checked by automated tests in `spec/`:
 
 - Only an empty plot can be planted. A user cannot plant in a spot where there is already a plant, and two people planting the same plot at the same moment cannot both succeed.
 - Anyone can water anyone's plot, and watering resets how long a plant has before it wilts.
+- The garden has four beds of 25 plots, and planting, watering and composting work the same in each.
 - A wilted plot cannot be watered or replanted until someone composts it.
 - A visitor's cookie is never sent to anyone else. Other people only ever see a one-way public id, and the colours come from that id.
 - Everyone who joins is told who is already here, a gardener's move reaches the others within a second, and two tabs from one browser are one gardener. Moves are checked and limited, so invalid ones, ones from someone not connected, and ones sent too fast are refused.
