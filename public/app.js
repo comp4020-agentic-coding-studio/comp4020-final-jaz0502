@@ -1245,13 +1245,26 @@ const FIGURE_HAND = new THREE.SphereGeometry(0.05, 6, 4);
 const ARM_REST = 0.15;
 const WAVE_MS = 2000;
 const WAVE_RING = new THREE.RingGeometry(0.25, 0.3, 40);
-const skinMaterial = flatMaterial(0xf2c9a0);
-const strawMaterial = flatMaterial(0xe8c872);
-const shadowMaterial = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25, depthWrite: false });
+const baseSkinMaterial = flatMaterial(0xf2c9a0);
+const baseStrawMaterial = flatMaterial(0xe8c872);
+const baseShadowMaterial = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25, depthWrite: false });
+
+// Someone who hasn't moved, waved or tended a plot for a while fades to a ghost
+// of their figure, so you can tell who is busy in the garden from who has left a
+// tab open. Anything they do brings them straight back. Like the rest of a
+// figure it is only for show, and only this browser works it out.
+const IDLE_MS = 2 * 60 * 1000;
+const IDLE_OPACITY = 0.35;
 
 function createFigure(id, u) {
   const group = new THREE.Group();
   const bodyMaterial = flatMaterial(colourFor(id));
+  // Every other figure gets its own copies of the shared materials, so it can fade
+  // on its own. Yours never fades: you know you are here.
+  const fades = id !== me;
+  const skinMaterial = fades ? baseSkinMaterial.clone() : baseSkinMaterial;
+  const strawMaterial = fades ? baseStrawMaterial.clone() : baseStrawMaterial;
+  const shadowMaterial = fades ? baseShadowMaterial.clone() : baseShadowMaterial;
   const body = new THREE.Mesh(FIGURE_BODY, bodyMaterial);
   body.position.y = 0.21;
   const head = new THREE.Mesh(FIGURE_HEAD, skinMaterial);
@@ -1280,7 +1293,9 @@ function createFigure(id, u) {
   const rightArm = makeArm(1);
   group.add(leftArm, rightArm);
 
-  const ownMaterials = [bodyMaterial];
+  const ownMaterials = fades ? [bodyMaterial, skinMaterial, strawMaterial, shadowMaterial] : [bodyMaterial];
+  // What each faded material goes back to: the shadow is always see-through.
+  const fadeMaterials = fades ? ownMaterials.map((material) => ({ material, full: material.opacity })) : [];
   let marker = null;
   if (id === me) {
     // A little gold arrow bobbing over your own figure, so you can find yourself.
@@ -1292,7 +1307,21 @@ function createFigure(id, u) {
   }
 
   scene.add(group);
-  const figure = { group, body, rightArm, waveStart: null, marker, ownMaterials, u, target: u, heading: 1, phase: Math.random() * 6.28 };
+  const figure = {
+    group,
+    body,
+    rightArm,
+    waveStart: null,
+    marker,
+    ownMaterials,
+    fadeMaterials,
+    fade: 1,
+    lastActive: performance.now(),
+    u,
+    target: u,
+    heading: 1,
+    phase: Math.random() * 6.28,
+  };
   figures.set(id, figure);
   return figure;
 }
@@ -1303,6 +1332,31 @@ function removeFigure(id) {
   scene.remove(figure.group);
   for (const material of figure.ownMaterials) material.dispose();
   figures.delete(id);
+}
+
+// Someone did something: moved, waved or tended a plot.
+function markActive(id) {
+  const figure = figures.get(id);
+  if (figure) figure.lastActive = performance.now();
+}
+
+// Eases a figure towards fully there or faded. A material only becomes
+// see-through while it is fading, so a figure at full strength draws as before.
+function updateFade(figure, now, dt) {
+  if (figure.fadeMaterials.length === 0) return;
+  const target = now - figure.lastActive > IDLE_MS ? IDLE_OPACITY : 1;
+  if (figure.fade === target) return;
+  const step = Math.min(1, dt * 2.5);
+  figure.fade += (target - figure.fade) * step;
+  if (Math.abs(target - figure.fade) < 0.005) figure.fade = target;
+  for (const { material, full } of figure.fadeMaterials) {
+    const transparent = full < 1 || figure.fade < 1;
+    if (material.transparent !== transparent) {
+      material.transparent = transparent;
+      material.needsUpdate = true;
+    }
+    material.opacity = full * figure.fade;
+  }
 }
 
 // Shortest way round the loop from a to b: -0.5 up to but not including 0.5.
@@ -1317,6 +1371,9 @@ function setGardener(gardener) {
   if (existing && gardener.id === me) return;
 
   const figure = existing ?? createFigure(gardener.id, gardener.u);
+  // A move is a sign of life, but the list sent on joining is not: it would wake
+  // every faded figure each time someone new arrived.
+  if (existing && figure.target !== gardener.target) figure.lastActive = performance.now();
   figure.target = gardener.target;
   if (existing && Math.abs(loopDifference(figure.u, gardener.u)) > 0.03) figure.u = gardener.u;
 }
@@ -1372,6 +1429,7 @@ function updateFigures(now) {
     figure.group.position.set(here.x, PATH_TOP + (walking ? Math.abs(step) * 0.05 : 0), here.z);
     figure.body.rotation.z = walking ? step * 0.08 : 0;
     if (figure.marker) figure.marker.position.y = 1.05 + Math.sin(t * 3) * 0.05;
+    updateFade(figure, now, dt);
 
     // A wave: the right arm lifts quickly, swings for a while and drops again.
     if (figure.waveStart !== null) {
@@ -1397,6 +1455,7 @@ function waveFigure(id) {
   if (!figure) return;
 
   figure.waveStart = performance.now();
+  figure.lastActive = figure.waveStart;
   const material = new THREE.MeshBasicMaterial({
     color: colourFor(id),
     transparent: true,
@@ -1544,7 +1603,9 @@ function connect() {
     renderFeed();
   });
   source.addEventListener("activity", (event) => {
-    feed = [JSON.parse(event.data), ...feed].slice(0, FEED_LENGTH);
+    const activity = JSON.parse(event.data);
+    markActive(activity.id);
+    feed = [activity, ...feed].slice(0, FEED_LENGTH);
     renderFeed();
   });
 }
