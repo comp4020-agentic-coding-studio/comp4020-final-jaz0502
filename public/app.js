@@ -1,8 +1,14 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-const GRID_SIZE = 25;
+// Two beds of 25, each in its own area with its own path: plots 0 to 24 are Bed 1,
+// 25 to 49 Bed 2. A stone walkway joins the two paths.
+const BED_PLOTS = 25;
+const BEDS = 2;
+const GRID_SIZE = BED_PLOTS * BEDS;
 const COLS = 5;
+// Where each bed's centre is along x. Bed 1 stays where the garden always was.
+const BED_CENTRES = [0, 12];
 const TILE_SIZE = 0.9;
 const TILE_HEIGHT = 0.15;
 const SPACING = 1.0;
@@ -97,9 +103,11 @@ function actionFor(state) {
 }
 
 function worldPosition(position) {
-  const row = Math.floor(position / COLS);
-  const col = position % COLS;
-  return { x: (col - 2) * SPACING, z: (row - 2) * SPACING };
+  const bed = Math.floor(position / BED_PLOTS);
+  const inBed = position % BED_PLOTS;
+  const row = Math.floor(inBed / COLS);
+  const col = inBed % COLS;
+  return { x: BED_CENTRES[bed] + (col - 2) * SPACING, z: (row - 2) * SPACING };
 }
 
 function soilColorFor(state) {
@@ -259,7 +267,9 @@ scene.background = new THREE.Color(0xbfe3f0);
 // the horizon behind it.
 const CAMERA_TARGET = new THREE.Vector3(0, 0.7, 0);
 const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 120);
-camera.position.set(7, 3.6, 7);
+// Looking across Bed 1 towards Bed 2, so the other bed shows in the distance and
+// can be hovered and clicked to go there.
+camera.position.set(-9, 4.2, 3.5);
 camera.lookAt(CAMERA_TARGET);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -511,35 +521,51 @@ function updateSky() {
   skyLight.intensity = (from.lightI + (to.lightI - from.lightI) * t) * Math.min(Math.max(height / 0.3, 0), 1);
 }
 
-const bedBase = new THREE.Mesh(
-  new THREE.BoxGeometry(COLS * SPACING + 0.6, 0.3, COLS * SPACING + 0.6),
-  flatMaterial(0x7a5a3a),
-);
-bedBase.position.y = -0.3;
-scene.add(bedBase);
+const bedBaseGeometry = new THREE.BoxGeometry(COLS * SPACING + 0.6, 0.3, COLS * SPACING + 0.6);
+// Each bed has its own base material, so the one you are pointing at can glow a
+// little without the other changing.
+const bedBaseColour = new THREE.Color(0x7a5a3a);
+const bedBases = BED_CENTRES.map((centre) => {
+  const bedBase = new THREE.Mesh(bedBaseGeometry, flatMaterial(bedBaseColour));
+  bedBase.position.set(centre, -0.3, 0);
+  scene.add(bedBase);
+  return bedBase;
+});
 
-// The path: large flagstones set in earth, in a ring round the bed, where the
-// gardeners walk. The loop is the square line down the middle of it, and a
-// position on it is a fraction u from 0 up to but not including 1, so the server
-// never needs to know its shape.
+// The paths: each bed has its own ring of large flagstones set in earth, where the
+// gardeners walk, and a short stone walkway joins the two rings. The loop is the
+// square line down the middle of a ring. A figure's position is one fraction u
+// from 0 up to but not including 1, so the server never needs to know the shape:
+// the first half of u is round Bed 1, the second half round Bed 2.
 const PATH_INNER = 2.8;
 const PATH_OUTER = 4.5;
 const PATH_TOP = GROUND_Y + 0.07;
 const LOOP_HALF = 3.35;
+const LOOP_LENGTH = 8 * LOOP_HALF;
+// The walkway runs along z = 0 from Bed 1's loop to Bed 2's.
+const WALKWAY_START = BED_CENTRES[0] + LOOP_HALF;
+const WALKWAY_END = BED_CENTRES[1] - LOOP_HALF;
+const WALKWAY_HALF_WIDTH = 0.85;
 
 // Earth showing in the gaps between the stones, so they read as set in the ground
 // rather than laid on the grass.
 const earthMaterial = flatMaterial(0x8a7556);
-for (const [x, z, width, depth] of [
-  [0, -3.7, 9.4, 2.0],
-  [0, 3.7, 9.4, 2.0],
-  [-3.7, 0, 2.0, 5.4],
-  [3.7, 0, 2.0, 5.4],
-]) {
+function earthSlab(x, z, width, depth) {
   const slab = new THREE.Mesh(new THREE.BoxGeometry(width, 0.03, depth), earthMaterial);
   slab.position.set(x, GROUND_Y + 0.015, z);
   scene.add(slab);
 }
+for (const centre of BED_CENTRES) {
+  for (const [x, z, width, depth] of [
+    [0, -3.7, 9.4, 2.0],
+    [0, 3.7, 9.4, 2.0],
+    [-3.7, 0, 2.0, 5.4],
+    [3.7, 0, 2.0, 5.4],
+  ]) {
+    earthSlab(centre + x, z, width, depth);
+  }
+}
+earthSlab((WALKWAY_START + WALKWAY_END) / 2, 0, WALKWAY_END - WALKWAY_START, WALKWAY_HALF_WIDTH * 2 + 0.2);
 
 // One flagstone: an irregular seven-sided slab with softened edges, never the
 // same shape twice.
@@ -569,16 +595,26 @@ function flagstoneGeometry(seed) {
 const flagstoneGeometries = [0, 1, 2, 3, 4, 5, 6, 7].map(flagstoneGeometry);
 const stoneMaterials = [0x9b968d, 0x8c8880, 0xa8a398, 0x7d7a73, 0xb0aa9d].map((colour) => flatMaterial(colour));
 
-// Stones on a loose, jittered grid across the band: two across, each turned and
+// Is a spot on a path: on either ring, or on the walkway between them?
+function onPath(x, z) {
+  for (const centre of BED_CENTRES) {
+    const edge = Math.max(Math.abs(x - centre), Math.abs(z));
+    if (edge >= PATH_INNER && edge <= PATH_OUTER) return true;
+  }
+  return x > WALKWAY_START && x < WALKWAY_END && Math.abs(z) <= WALKWAY_HALF_WIDTH;
+}
+
+// Stones on a loose, jittered grid across the paths: two across, each turned and
 // sized a little differently, with small gaps between.
 const STONE_SPACING = 0.95;
-for (let ix = -5; ix <= 5; ix++) {
+const STONES_FROM = Math.floor((BED_CENTRES[0] - PATH_OUTER) / STONE_SPACING);
+const STONES_TO = Math.ceil((BED_CENTRES[BEDS - 1] + PATH_OUTER) / STONE_SPACING);
+for (let ix = STONES_FROM; ix <= STONES_TO; ix++) {
   for (let iz = -5; iz <= 5; iz++) {
     const n = ix * 53 + iz * 29;
     const x = ix * STONE_SPACING + (seeded(n + 1) - 0.5) * 0.16;
     const z = iz * STONE_SPACING + (seeded(n + 2) - 0.5) * 0.16;
-    const edge = Math.max(Math.abs(x), Math.abs(z));
-    if (edge < PATH_INNER || edge > PATH_OUTER) continue;
+    if (!onPath(x, z)) continue;
 
     const stone = new THREE.Mesh(
       flagstoneGeometries[Math.floor(seeded(n + 3) * flagstoneGeometries.length)],
@@ -593,36 +629,56 @@ for (let ix = -5; ix <= 5; ix++) {
   }
 }
 
-// Where u is on the loop: along each of the four sides in turn.
-function loopPoint(u) {
-  const along = (((u % 1) + 1) % 1) * 4;
-  const side = Math.floor(along);
-  const t = (along - side) * 2 - 1;
-  if (side === 0) return { x: t * LOOP_HALF, z: -LOOP_HALF };
-  if (side === 1) return { x: LOOP_HALF, z: t * LOOP_HALF };
-  if (side === 2) return { x: -t * LOOP_HALF, z: LOOP_HALF };
-  return { x: -LOOP_HALF, z: -t * LOOP_HALF };
+// Which bed's loop a value of u is on: the first half is Bed 1, the second Bed 2.
+function bedOf(u) {
+  return Math.min(Math.floor((((u % 1) + 1) % 1) * BEDS), BEDS - 1);
 }
 
-// The point on the loop nearest to somewhere on the ground.
-function nearestLoopU(x, z) {
+// Where on its own bed's loop u is, from 0 up to but not including 1.
+function alongLoop(u) {
+  return ((((u % 1) + 1) % 1) * BEDS) % 1;
+}
+
+function toU(bed, along) {
+  return (bed + (((along % 1) + 1) % 1)) / BEDS;
+}
+
+// Where u is: round its bed's loop, side by side, starting at the back left.
+function loopPoint(u) {
+  const centre = BED_CENTRES[bedOf(u)];
+  const along = alongLoop(u) * 4;
+  const side = Math.floor(along);
+  const t = (along - side) * 2 - 1;
+  if (side === 0) return { x: centre + t * LOOP_HALF, z: -LOOP_HALF };
+  if (side === 1) return { x: centre + LOOP_HALF, z: t * LOOP_HALF };
+  if (side === 2) return { x: centre - t * LOOP_HALF, z: LOOP_HALF };
+  return { x: centre - LOOP_HALF, z: -t * LOOP_HALF };
+}
+
+// Where each end of the walkway is on its bed's loop: halfway down Bed 1's right
+// side, and halfway down Bed 2's left.
+const WALKWAY_U = [toU(0, 0.375), toU(1, 0.875)];
+
+// The point on a bed's loop nearest to somewhere on the ground.
+function nearestLoopU(x, z, bed) {
+  const lx = x - BED_CENTRES[bed];
   const clamp = (v) => Math.min(Math.max(v / LOOP_HALF, -1), 1);
   const candidates = [
-    { t: clamp(x), side: 0, px: clamp(x) * LOOP_HALF, pz: -LOOP_HALF },
+    { t: clamp(lx), side: 0, px: clamp(lx) * LOOP_HALF, pz: -LOOP_HALF },
     { t: clamp(z), side: 1, px: LOOP_HALF, pz: clamp(z) * LOOP_HALF },
-    { t: clamp(-x), side: 2, px: -clamp(-x) * LOOP_HALF, pz: LOOP_HALF },
+    { t: clamp(-lx), side: 2, px: -clamp(-lx) * LOOP_HALF, pz: LOOP_HALF },
     { t: clamp(-z), side: 3, px: -LOOP_HALF, pz: -clamp(-z) * LOOP_HALF },
   ];
   let best = candidates[0];
   let bestDistance = Infinity;
   for (const candidate of candidates) {
-    const distance = (candidate.px - x) ** 2 + (candidate.pz - z) ** 2;
+    const distance = (candidate.px - lx) ** 2 + (candidate.pz - z) ** 2;
     if (distance < bestDistance) {
       best = candidate;
       bestDistance = distance;
     }
   }
-  return ((best.side + (best.t + 1) / 2) / 4) % 1;
+  return toU(bed, (best.side + (best.t + 1) / 2) / 4);
 }
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -644,6 +700,9 @@ const feedBody = document.getElementById("feed-body");
 // The panel covers part of the garden, so slide the view over until the bed
 // sits in the middle of the part you can still see. On a wide window the panel
 // is on the left; on a narrow one it is a sheet along the bottom.
+// One bed and the path round it, which is all the camera frames at a time.
+const GARDEN_WIDTH = 1.2;
+
 function updateViewOffset() {
   const width = container.clientWidth;
   const height = container.clientHeight;
@@ -655,11 +714,12 @@ function updateViewOffset() {
   const shiftX = narrow || !open ? 0 : rect.right / 2;
   const shiftY = narrow ? rect.height / 2 : 0;
 
-  // The bed and the path round it are about 1.2 of the window's height wide at full zoom, so if the
-  // part of the window the panel leaves free is narrower than that (a phone
-  // held upright, or a tablet with the panel open), pull the view back to fit.
+  // A bed and the path round it are about GARDEN_WIDTH of the window's height
+  // wide at full zoom, so if the part of the window the panel leaves free is
+  // narrower than that (a phone held upright, or a tablet with the panel open),
+  // pull the view back to fit.
   const freeWidth = width - shiftX * 2;
-  camera.zoom = Math.min(1, freeWidth / (1.2 * height));
+  camera.zoom = Math.min(1, freeWidth / (GARDEN_WIDTH * height));
   camera.setViewOffset(width, height, -shiftX, shiftY, width, height);
 }
 
@@ -1179,6 +1239,62 @@ function showStatusMessage(text) {
   }, 4000);
 }
 
+// Going to a bed. You look at one bed at a time; the other shows in the distance,
+// and hovering it offers to take you there. Clicking glides the camera over, and
+// your figure walks there, round the path and across the walkway. Which bed you
+// are at limits nothing: anyone can still act on any plot.
+const BED_GLIDE_MS = 800;
+const BED_NAMES = ["the first bed", "the second bed"];
+// A little above the far bed's middle, where its sign floats.
+const BED_SIGN_HEIGHT = 1.6;
+let currentBed = 0;
+let glide = null; // { start, fromTarget, toTarget, fromCamera, toCamera }
+
+function bedOfPosition(position) {
+  return Math.floor(position / BED_PLOTS);
+}
+
+// Which bed's area a spot on the ground is in: the bed and the path round it.
+// null for open grass and the walkway between them.
+function bedAreaAt(x, z) {
+  for (let bed = 0; bed < BEDS; bed++) {
+    if (Math.max(Math.abs(x - BED_CENTRES[bed]), Math.abs(z)) <= PATH_OUTER) return bed;
+  }
+  return null;
+}
+
+function goToBed(bed) {
+  if (bed === currentBed) return;
+  currentBed = bed;
+  setHoveredBed(null);
+
+  // Look at the new bed from the far side, mirroring your view, so the bed you
+  // came from is now the one in the distance. Height and zoom stay as you had them.
+  const offset = camera.position.clone().sub(controls.target);
+  offset.x = -offset.x;
+  const toTarget = controls.target.clone().setX(BED_CENTRES[bed]);
+  glide = {
+    start: performance.now(),
+    fromTarget: controls.target.clone(),
+    toTarget,
+    fromCamera: camera.position.clone(),
+    toCamera: toTarget.clone().add(offset),
+  };
+
+  // Walk to the near side of that bed's path, if you aren't there already.
+  const mine = figures.get(me);
+  if (mine && bedOf(mine.target) !== bed) walkTo(toU(bed, 0.625));
+}
+
+function updateGlide(now) {
+  if (!glide) return;
+  const t = Math.min(1, (now - glide.start) / BED_GLIDE_MS);
+  const eased = t * t * (3 - 2 * t);
+  controls.target.lerpVectors(glide.fromTarget, glide.toTarget, eased);
+  camera.position.lerpVectors(glide.fromCamera, glide.toCamera, eased);
+  if (t >= 1) glide = null;
+}
+
 const picker = document.getElementById("plant-picker");
 const pickerButtons = [...picker.querySelectorAll("[data-type]")];
 
@@ -1230,7 +1346,7 @@ function applyPlot(plot) {
 // limits nothing anyone can do to a plot. The server only relays where a figure
 // is and where it is going; each browser does the walking itself, so there is no
 // per-frame traffic and two browsers can differ by a fraction of a second.
-const WALK_SPEED = 0.055; // fractions of the loop a second: about 1.6 units, a lap in 18s
+const WALK_UNITS = 1.5; // world units a second, about a lap of one bed in 18s
 const figures = new Map(); // public id -> { group, u, target, heading, phase, ... }
 
 const FIGURE_BODY = new THREE.CylinderGeometry(0.1, 0.15, 0.42, 8);
@@ -1320,6 +1436,8 @@ function createFigure(id, u) {
     u,
     target: u,
     heading: 1,
+    // Set while walking the walkway to the other bed: { to, progress from 0 to 1 }.
+    crossing: null,
     phase: Math.random() * 6.28,
   };
   figures.set(id, figure);
@@ -1359,9 +1477,65 @@ function updateFade(figure, now, dt) {
   }
 }
 
-// Shortest way round the loop from a to b: -0.5 up to but not including 0.5.
-function loopDifference(a, b) {
-  return ((b - a + 1.5) % 1) - 0.5;
+// Shortest way round one bed's loop from a to b, both on the same bed, as a
+// fraction of that loop: -0.5 up to but not including 0.5.
+function alongDifference(a, b) {
+  return ((alongLoop(b) - alongLoop(a) + 1.5) % 1) - 0.5;
+}
+
+// How far apart two spots are for a figure, in world units, counting the walk
+// round to the walkway and across it when they are at different beds. Used to
+// tell when a figure has drifted too far from where the server says it is.
+function walkDistance(a, b) {
+  if (bedOf(a) === bedOf(b)) return Math.abs(alongDifference(a, b)) * LOOP_LENGTH;
+  const there = WALKWAY_U[bedOf(a)];
+  const back = WALKWAY_U[bedOf(b)];
+  return (
+    Math.abs(alongDifference(a, there)) * LOOP_LENGTH +
+    (WALKWAY_END - WALKWAY_START) +
+    Math.abs(alongDifference(back, b)) * LOOP_LENGTH
+  );
+}
+
+// One frame's walk for a figure. Round its own bed it takes the shorter way. To
+// reach the other bed it walks round to the walkway, crosses it, then carries on
+// round to where it is going. Every browser works out the same walk from the same
+// u and target, so nothing extra goes to the server. Returns where it stands.
+function stepFigure(figure, dt) {
+  let budget = WALK_UNITS * dt;
+
+  // Partway across the walkway: keep going, then step onto the far loop.
+  if (figure.crossing) {
+    const crossing = figure.crossing;
+    const length = WALKWAY_END - WALKWAY_START;
+    crossing.progress = Math.min(1, crossing.progress + budget / length);
+    if (crossing.progress >= 1) {
+      figure.crossing = null;
+      figure.u = WALKWAY_U[crossing.to];
+    }
+    const x = crossing.to === 1 ? WALKWAY_START + crossing.progress * length : WALKWAY_END - crossing.progress * length;
+    figure.heading = crossing.to === 1 ? 1 : -1;
+    return { walking: true, point: { x, z: 0 }, direction: { x: figure.heading, z: 0 } };
+  }
+
+  // Going to the other bed: first to this bed's end of the walkway.
+  const otherBed = bedOf(figure.target) !== bedOf(figure.u);
+  const goal = otherBed ? WALKWAY_U[bedOf(figure.u)] : figure.target;
+  const diff = alongDifference(figure.u, goal);
+  if (Math.abs(diff) <= 0.0005) {
+    if (otherBed) {
+      figure.crossing = { to: bedOf(figure.target), progress: 0 };
+      return stepFigure(figure, dt);
+    }
+    return { walking: false, point: loopPoint(figure.u), direction: null };
+  }
+
+  figure.heading = Math.sign(diff);
+  const move = Math.min(Math.abs(diff), budget / LOOP_LENGTH);
+  figure.u = toU(bedOf(figure.u), alongLoop(figure.u) + figure.heading * move);
+  const point = loopPoint(figure.u);
+  const ahead = loopPoint(toU(bedOf(figure.u), alongLoop(figure.u) + figure.heading * 0.002));
+  return { walking: true, point, direction: { x: ahead.x - point.x, z: ahead.z - point.z } };
 }
 
 function setGardener(gardener) {
@@ -1375,7 +1549,9 @@ function setGardener(gardener) {
   // every faded figure each time someone new arrived.
   if (existing && figure.target !== gardener.target) figure.lastActive = performance.now();
   figure.target = gardener.target;
-  if (existing && Math.abs(loopDifference(figure.u, gardener.u)) > 0.03) figure.u = gardener.u;
+  // If this browser has drifted well away from where the server says the figure
+  // is, put it there. Not while it is crossing the walkway: it is on its way.
+  if (existing && !figure.crossing && walkDistance(figure.u, gardener.u) > 0.8) figure.u = gardener.u;
 }
 
 function setPresence(gardeners) {
@@ -1412,18 +1588,8 @@ function updateFigures(now) {
   const t = now / 1000;
 
   for (const figure of figures.values()) {
-    const diff = loopDifference(figure.u, figure.target);
-    const walking = Math.abs(diff) > 0.0005;
-    if (walking) {
-      figure.heading = Math.sign(diff);
-      figure.u = (figure.u + figure.heading * Math.min(Math.abs(diff), WALK_SPEED * dt) + 1) % 1;
-    }
-
-    const here = loopPoint(figure.u);
-    if (walking) {
-      const ahead = loopPoint(figure.u + figure.heading * 0.002);
-      figure.group.rotation.y = Math.atan2(ahead.x - here.x, ahead.z - here.z);
-    }
+    const { walking, point: here, direction } = stepFigure(figure, dt);
+    if (direction) figure.group.rotation.y = Math.atan2(direction.x, direction.z);
     // A little bounce and sway while walking, standing still on arriving.
     const step = Math.sin(t * 10 + figure.phase);
     figure.group.position.set(here.x, PATH_TOP + (walking ? Math.abs(step) * 0.05 : 0), here.z);
@@ -1507,7 +1673,9 @@ function sendPresence() {
   fetch("/api/presence", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ u: mine.u, target: mine.target }),
+    // Partway across the walkway the figure isn't on either loop, so say it is at
+    // the end it is heading for: others see at most a small jump.
+    body: JSON.stringify({ u: mine.crossing ? WALKWAY_U[mine.crossing.to] : mine.u, target: mine.target }),
   }).catch(() => {});
 }
 
@@ -1638,17 +1806,26 @@ async function handlePointerClick(event) {
   const hit = raycaster.intersectObjects(soilMeshes, false)[0];
   if (!hit) {
     // Not a plot: a click on the grass or the path sends your figure to the
-    // nearest point on the path.
+    // nearest point on the path, or over to the other bed if it is nearer that.
     const point = new THREE.Vector3();
-    if (raycaster.ray.intersectPlane(GROUND_PLANE, point)) walkTo(nearestLoopU(point.x, point.z));
+    if (!raycaster.ray.intersectPlane(GROUND_PLANE, point)) return;
+    const bed = bedAreaAt(point.x, point.z);
+    if (bed !== null && bed !== currentBed) goToBed(bed);
+    else walkTo(nearestLoopU(point.x, point.z, currentBed));
     return;
   }
 
   const position = hit.object.userData.position;
+  // A plot in the bed you aren't at takes you there, rather than acting on it
+  // from across the garden.
+  if (bedOfPosition(position) !== currentBed) {
+    goToBed(bedOfPosition(position));
+    return;
+  }
   // Clicking a plot still acts on it, and your figure walks round to the path
   // beside it, where others can watch you tend it.
   const plotSpot = worldPosition(position);
-  walkTo(nearestLoopU(plotSpot.x, plotSpot.z));
+  walkTo(nearestLoopU(plotSpot.x, plotSpot.z, currentBed));
   const state = plots.get(position)?.state ?? "empty";
   const action = actionFor(state);
 
@@ -1681,13 +1858,83 @@ renderer.domElement.addEventListener("pointerup", (event) => {
   if (dist < 6) handlePointerClick(event);
 });
 
+// Which other bed the pointer is over, if any, so it can be offered as a place
+// to go. null when the pointer is over the bed you are at, or nowhere near.
+let hoveredBed = null;
+
+// The sign over the bed you aren't at. Clicking it, or the bed, takes you there.
+const bedSign = document.getElementById("bed-sign");
+const bedSignLabel = bedSign.querySelector(".bed-sign-label");
+const signPoint = new THREE.Vector3();
+
+function setHoveredBed(bed) {
+  if (bed === hoveredBed) return;
+  hoveredBed = bed;
+  renderer.domElement.style.cursor = bed === null ? "" : "pointer";
+  bedSign.classList.toggle("is-hovered", bed !== null);
+  bedBases.forEach((base, i) => {
+    base.material.emissive.setHex(i === bed ? 0x3a2a14 : 0x000000);
+  });
+}
+
+// Keep the sign over the far bed as the view moves, and hide it when that bed is
+// behind the camera or off the screen.
+function updateBedSign() {
+  const bed = currentBed === 0 ? 1 : 0;
+  signPoint.set(BED_CENTRES[bed], BED_SIGN_HEIGHT, 0).project(camera);
+  const rect = renderer.domElement.getBoundingClientRect();
+  const x = rect.left + ((signPoint.x + 1) / 2) * rect.width;
+  const y = rect.top + ((1 - signPoint.y) / 2) * rect.height;
+  const visible = !glide && signPoint.z < 1 && x > rect.left && x < rect.right && y > rect.top && y < rect.bottom;
+  if (bedSign.hidden === visible) bedSign.hidden = !visible;
+  if (!visible) return;
+  bedSign.dataset.bed = String(bed);
+  const label = `Go to ${BED_NAMES[bed]}`;
+  if (bedSignLabel.textContent !== label) {
+    bedSignLabel.textContent = label;
+    bedSign.setAttribute("aria-label", label);
+  }
+  bedSign.style.left = `${x}px`;
+  bedSign.style.top = `${y}px`;
+}
+
+bedSign.addEventListener("click", () => goToBed(Number(bedSign.dataset.bed)));
+bedSign.addEventListener("pointerenter", () => setHoveredBed(Number(bedSign.dataset.bed)));
+bedSign.addEventListener("pointerleave", () => setHoveredBed(null));
+
+function clearHoveredPlot() {
+  if (hoveredPosition !== null) sceneObjects.get(hoveredPosition).soilMesh.scale.set(1, 1, 1);
+  hoveredPosition = null;
+}
+
 renderer.domElement.addEventListener("pointermove", (event) => {
   raycaster.setFromCamera(ndcFromEvent(event), camera);
   const hit = raycaster.intersectObjects(soilMeshes, false)[0];
-  const position = hit ? hit.object.userData.position : null;
-  if (position === hoveredPosition) return;
+  let position = hit ? hit.object.userData.position : null;
 
-  if (hoveredPosition !== null) sceneObjects.get(hoveredPosition).soilMesh.scale.set(1, 1, 1);
+  // Over the other bed, or the grass and path round it: offer to go there.
+  let otherBed = null;
+  if (position !== null && bedOfPosition(position) !== currentBed) {
+    otherBed = bedOfPosition(position);
+    position = null;
+  } else if (position === null) {
+    const point = new THREE.Vector3();
+    if (raycaster.ray.intersectPlane(GROUND_PLANE, point)) {
+      const bed = bedAreaAt(point.x, point.z);
+      if (bed !== null && bed !== currentBed) otherBed = bed;
+    }
+  }
+
+  if (otherBed !== null) {
+    clearHoveredPlot();
+    setHoveredBed(otherBed);
+    return;
+  }
+  const wasOverBed = hoveredBed !== null;
+  setHoveredBed(null);
+  if (position === hoveredPosition && !wasOverBed) return;
+
+  clearHoveredPlot();
   hoveredPosition = position;
   if (position !== null) {
     sceneObjects.get(position).soilMesh.scale.set(1, 1.25, 1);
@@ -1698,15 +1945,17 @@ renderer.domElement.addEventListener("pointermove", (event) => {
 });
 
 renderer.domElement.addEventListener("pointerleave", () => {
-  if (hoveredPosition !== null) sceneObjects.get(hoveredPosition).soilMesh.scale.set(1, 1, 1);
-  hoveredPosition = null;
+  clearHoveredPlot();
+  setHoveredBed(null);
   clearStatusBarHover();
 });
 
 function animate() {
   requestAnimationFrame(animate);
-  controls.update();
   const now = performance.now();
+  updateGlide(now);
+  controls.update();
+  updateBedSign();
   tickAnimations(now);
   updateRings(now);
   updateSky();

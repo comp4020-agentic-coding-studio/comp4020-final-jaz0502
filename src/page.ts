@@ -73,6 +73,10 @@ export function renderPage(): string {
   </aside>
   </div>
 
+  <button type="button" id="bed-sign" class="bed-sign" hidden>
+    <span class="bed-sign-label"></span>
+  </button>
+
   <p id="status-bar" role="status" aria-live="polite">Hover a plot to see its status. Click to act.</p>
 
   <script type="importmap">

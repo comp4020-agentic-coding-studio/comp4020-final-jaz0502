@@ -310,6 +310,76 @@ body {
   text-align: center;
 }
 
+/* A small sign floating over the bed you aren't at, inviting you over. It follows
+   the bed on screen; hovering the bed or the sign makes it stand out. */
+.bed-sign {
+  position: fixed;
+  z-index: 1;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.2);
+  color: #1b2a1b;
+  font: inherit;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  cursor: pointer;
+  transform: translate(-50%, calc(-100% - 18px)) scale(0.92);
+  transition: transform 160ms ease, background 160ms ease, box-shadow 160ms ease;
+  animation: bed-sign-bob 2.4s ease-in-out infinite;
+}
+
+/* A gold pointer under the sign, like the one over your own figure, pointing
+   down at the bed. */
+.bed-sign::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  margin-top: 5px;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 11px solid #ffd23f;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
+  transform: translateX(-50%);
+}
+
+.bed-sign.is-hovered,
+.bed-sign:hover,
+.bed-sign:focus-visible {
+  background: #2f6b3a;
+  border-color: #2f6b3a;
+  color: #ffffff;
+  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.3);
+  transform: translate(-50%, calc(-100% - 18px)) scale(1.06);
+  animation: none;
+}
+
+@keyframes bed-sign-bob {
+  0%,
+  100% {
+    margin-top: 0;
+  }
+  50% {
+    margin-top: -4px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bed-sign {
+    animation: none;
+    transition: none;
+  }
+}
+
 .swatch {
   display: inline-block;
   width: 0.8em;
