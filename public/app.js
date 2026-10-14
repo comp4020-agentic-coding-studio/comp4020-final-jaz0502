@@ -1,14 +1,24 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-// Two beds of 25, each in its own area with its own path: plots 0 to 24 are Bed 1,
-// 25 to 49 Bed 2. A stone walkway joins the two paths.
+// Four beds of 25, each in its own area with its own path, in a square: plots 0 to
+// 24 are Bed 1, 25 to 49 Bed 2, 50 to 74 Bed 3 and 75 to 99 Bed 4. Stone walkways
+// join each bed to its two neighbours round the square.
 const BED_PLOTS = 25;
-const BEDS = 2;
+const BEDS = 4;
 const GRID_SIZE = BED_PLOTS * BEDS;
 const COLS = 5;
-// Where each bed's centre is along x. Bed 1 stays where the garden always was.
-const BED_CENTRES = [0, 12];
+// Where each bed's centre is. Bed 1 stays where the garden always was; Bed 2 is to
+// its right, and Beds 3 and 4 behind those two.
+const BED_GAP = 12;
+const BED_CENTRES = [
+  { x: 0, z: 0 },
+  { x: BED_GAP, z: 0 },
+  { x: 0, z: -BED_GAP },
+  { x: BED_GAP, z: -BED_GAP },
+];
+// The middle of the square of beds: the camera always looks inwards across it.
+const GARDEN_CENTRE = { x: BED_GAP / 2, z: -BED_GAP / 2 };
 const TILE_SIZE = 0.9;
 const TILE_HEIGHT = 0.15;
 const SPACING = 1.0;
@@ -107,7 +117,7 @@ function worldPosition(position) {
   const inBed = position % BED_PLOTS;
   const row = Math.floor(inBed / COLS);
   const col = inBed % COLS;
-  return { x: BED_CENTRES[bed] + (col - 2) * SPACING, z: (row - 2) * SPACING };
+  return { x: BED_CENTRES[bed].x + (col - 2) * SPACING, z: BED_CENTRES[bed].z + (row - 2) * SPACING };
 }
 
 function soilColorFor(state) {
@@ -267,9 +277,9 @@ scene.background = new THREE.Color(0xbfe3f0);
 // the horizon behind it.
 const CAMERA_TARGET = new THREE.Vector3(0, 0.7, 0);
 const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 120);
-// Looking across Bed 1 towards Bed 2, so the other bed shows in the distance and
-// can be hovered and clicked to go there.
-camera.position.set(-9, 4.2, 3.5);
+// From outside the square, looking across Bed 1 towards the other beds, so they
+// show in the distance and can be hovered and clicked to go there.
+camera.position.set(-6.5, 4.2, 6.5);
 camera.lookAt(CAMERA_TARGET);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -527,25 +537,73 @@ const bedBaseGeometry = new THREE.BoxGeometry(COLS * SPACING + 0.6, 0.3, COLS * 
 const bedBaseColour = new THREE.Color(0x7a5a3a);
 const bedBases = BED_CENTRES.map((centre) => {
   const bedBase = new THREE.Mesh(bedBaseGeometry, flatMaterial(bedBaseColour));
-  bedBase.position.set(centre, -0.3, 0);
+  bedBase.position.set(centre.x, -0.3, centre.z);
   scene.add(bedBase);
   return bedBase;
 });
 
 // The paths: each bed has its own ring of large flagstones set in earth, where the
-// gardeners walk, and a short stone walkway joins the two rings. The loop is the
-// square line down the middle of a ring. A figure's position is one fraction u
-// from 0 up to but not including 1, so the server never needs to know the shape:
-// the first half of u is round Bed 1, the second half round Bed 2.
+// gardeners walk, and short stone walkways join neighbouring rings. The loop is
+// the square line down the middle of a ring. A figure's position is one fraction
+// u from 0 up to but not including 1, so the server never needs to know the shape:
+// each quarter of u is round one bed.
 const PATH_INNER = 2.8;
 const PATH_OUTER = 4.5;
 const PATH_TOP = GROUND_Y + 0.07;
 const LOOP_HALF = 3.35;
 const LOOP_LENGTH = 8 * LOOP_HALF;
-// The walkway runs along z = 0 from Bed 1's loop to Bed 2's.
-const WALKWAY_START = BED_CENTRES[0] + LOOP_HALF;
-const WALKWAY_END = BED_CENTRES[1] - LOOP_HALF;
 const WALKWAY_HALF_WIDTH = 0.85;
+// Where on a bed's loop the middle of each side is, as a fraction of the loop
+// (see loopPoint): back, right, front, left.
+const SIDE_MIDDLE = { back: 0.125, right: 0.375, front: 0.625, left: 0.875 };
+// The walkways round the square, each joining the facing sides of two beds.
+const WALKWAYS = [
+  [0, "right", 1, "left"],
+  [1, "back", 3, "front"],
+  [3, "left", 2, "right"],
+  [2, "front", 0, "back"],
+].map(([a, aSide, b, bSide]) => ({ a, aAlong: SIDE_MIDDLE[aSide], b, bAlong: SIDE_MIDDLE[bSide] }));
+
+// Which bed's loop a value of u is on: each quarter of u is one bed.
+function bedOf(u) {
+  return Math.min(Math.floor((((u % 1) + 1) % 1) * BEDS), BEDS - 1);
+}
+
+// Where on its own bed's loop u is, from 0 up to but not including 1.
+function alongLoop(u) {
+  return ((((u % 1) + 1) % 1) * BEDS) % 1;
+}
+
+function toU(bed, along) {
+  return (bed + (((along % 1) + 1) % 1)) / BEDS;
+}
+
+// Where a point round a bed's loop is, from 0 up to but not including 1: the back
+// side first, then the right, the front and the left.
+function bedLoopPoint(bed, alongValue) {
+  const centre = BED_CENTRES[bed];
+  const along = ((((alongValue % 1) + 1) % 1) * 4);
+  const side = Math.floor(along);
+  const t = (along - side) * 2 - 1;
+  if (side === 0) return { x: centre.x + t * LOOP_HALF, z: centre.z - LOOP_HALF };
+  if (side === 1) return { x: centre.x + LOOP_HALF, z: centre.z + t * LOOP_HALF };
+  if (side === 2) return { x: centre.x - t * LOOP_HALF, z: centre.z + LOOP_HALF };
+  return { x: centre.x - LOOP_HALF, z: centre.z - t * LOOP_HALF };
+}
+
+function loopPoint(u) {
+  return bedLoopPoint(bedOf(u), alongLoop(u));
+}
+
+// Each walkway's two ends, on the ground and as u.
+for (const walkway of WALKWAYS) {
+  walkway.from = bedLoopPoint(walkway.a, walkway.aAlong);
+  walkway.to = bedLoopPoint(walkway.b, walkway.bAlong);
+  walkway.aU = toU(walkway.a, walkway.aAlong);
+  walkway.bU = toU(walkway.b, walkway.bAlong);
+  walkway.length = Math.hypot(walkway.to.x - walkway.from.x, walkway.to.z - walkway.from.z);
+}
+
 
 // Earth showing in the gaps between the stones, so they read as set in the ground
 // rather than laid on the grass.
@@ -562,10 +620,9 @@ for (const centre of BED_CENTRES) {
     [-3.7, 0, 2.0, 5.4],
     [3.7, 0, 2.0, 5.4],
   ]) {
-    earthSlab(centre + x, z, width, depth);
+    earthSlab(centre.x + x, centre.z + z, width, depth);
   }
 }
-earthSlab((WALKWAY_START + WALKWAY_END) / 2, 0, WALKWAY_END - WALKWAY_START, WALKWAY_HALF_WIDTH * 2 + 0.2);
 
 // One flagstone: an irregular seven-sided slab with softened edges, never the
 // same shape twice.
@@ -595,22 +652,37 @@ function flagstoneGeometry(seed) {
 const flagstoneGeometries = [0, 1, 2, 3, 4, 5, 6, 7].map(flagstoneGeometry);
 const stoneMaterials = [0x9b968d, 0x8c8880, 0xa8a398, 0x7d7a73, 0xb0aa9d].map((colour) => flatMaterial(colour));
 
-// Is a spot on a path: on either ring, or on the walkway between them?
+// Is a spot on a path: on one of the rings, or on a walkway between two?
 function onPath(x, z) {
   for (const centre of BED_CENTRES) {
-    const edge = Math.max(Math.abs(x - centre), Math.abs(z));
+    const edge = Math.max(Math.abs(x - centre.x), Math.abs(z - centre.z));
     if (edge >= PATH_INNER && edge <= PATH_OUTER) return true;
   }
-  return x > WALKWAY_START && x < WALKWAY_END && Math.abs(z) <= WALKWAY_HALF_WIDTH;
+  return WALKWAYS.some((walkway) => {
+    const { from, to } = walkway;
+    const dx = to.x - from.x;
+    const dz = to.z - from.z;
+    const length = Math.hypot(dx, dz);
+    const t = ((x - from.x) * dx + (z - from.z) * dz) / (length * length);
+    if (t <= 0 || t >= 1) return false;
+    return Math.abs((x - from.x) * dz - (z - from.z) * dx) / length <= WALKWAY_HALF_WIDTH;
+  });
 }
 
 // Stones on a loose, jittered grid across the paths: two across, each turned and
 // sized a little differently, with small gaps between.
 const STONE_SPACING = 0.95;
-const STONES_FROM = Math.floor((BED_CENTRES[0] - PATH_OUTER) / STONE_SPACING);
-const STONES_TO = Math.ceil((BED_CENTRES[BEDS - 1] + PATH_OUTER) / STONE_SPACING);
-for (let ix = STONES_FROM; ix <= STONES_TO; ix++) {
-  for (let iz = -5; iz <= 5; iz++) {
+const stoneRange = (axis) => {
+  const values = BED_CENTRES.map((centre) => centre[axis]);
+  return [
+    Math.floor((Math.min(...values) - PATH_OUTER) / STONE_SPACING),
+    Math.ceil((Math.max(...values) + PATH_OUTER) / STONE_SPACING),
+  ];
+};
+const [STONES_X_FROM, STONES_X_TO] = stoneRange("x");
+const [STONES_Z_FROM, STONES_Z_TO] = stoneRange("z");
+for (let ix = STONES_X_FROM; ix <= STONES_X_TO; ix++) {
+  for (let iz = STONES_Z_FROM; iz <= STONES_Z_TO; iz++) {
     const n = ix * 53 + iz * 29;
     const x = ix * STONE_SPACING + (seeded(n + 1) - 0.5) * 0.16;
     const z = iz * STONE_SPACING + (seeded(n + 2) - 0.5) * 0.16;
@@ -629,39 +701,36 @@ for (let ix = STONES_FROM; ix <= STONES_TO; ix++) {
   }
 }
 
-// Which bed's loop a value of u is on: the first half is Bed 1, the second Bed 2.
-function bedOf(u) {
-  return Math.min(Math.floor((((u % 1) + 1) % 1) * BEDS), BEDS - 1);
+// The walkway between two neighbouring beds, and which end is which for a figure
+// going from one to the other.
+function walkwayBetween(fromBed, toBed) {
+  for (const walkway of WALKWAYS) {
+    if (walkway.a === fromBed && walkway.b === toBed) {
+      return { walkway, startU: walkway.aU, endU: walkway.bU, start: walkway.from, end: walkway.to };
+    }
+    if (walkway.b === fromBed && walkway.a === toBed) {
+      return { walkway, startU: walkway.bU, endU: walkway.aU, start: walkway.to, end: walkway.from };
+    }
+  }
+  return null;
 }
 
-// Where on its own bed's loop u is, from 0 up to but not including 1.
-function alongLoop(u) {
-  return ((((u % 1) + 1) % 1) * BEDS) % 1;
-}
+// Beds in order round the square, so a figure can find the shorter way round.
+const BED_RING = [0, 1, 3, 2];
 
-function toU(bed, along) {
-  return (bed + (((along % 1) + 1) % 1)) / BEDS;
+// The next bed on the shorter way round the square from one bed to another.
+function nextBedTowards(fromBed, toBed) {
+  const from = BED_RING.indexOf(fromBed);
+  const steps = (BED_RING.indexOf(toBed) - from + BED_RING.length) % BED_RING.length;
+  // Straight across the square is as far either way: always go clockwise then.
+  const direction = steps <= BED_RING.length / 2 ? 1 : -1;
+  return BED_RING[(from + direction + BED_RING.length) % BED_RING.length];
 }
-
-// Where u is: round its bed's loop, side by side, starting at the back left.
-function loopPoint(u) {
-  const centre = BED_CENTRES[bedOf(u)];
-  const along = alongLoop(u) * 4;
-  const side = Math.floor(along);
-  const t = (along - side) * 2 - 1;
-  if (side === 0) return { x: centre + t * LOOP_HALF, z: -LOOP_HALF };
-  if (side === 1) return { x: centre + LOOP_HALF, z: t * LOOP_HALF };
-  if (side === 2) return { x: centre - t * LOOP_HALF, z: LOOP_HALF };
-  return { x: centre - LOOP_HALF, z: -t * LOOP_HALF };
-}
-
-// Where each end of the walkway is on its bed's loop: halfway down Bed 1's right
-// side, and halfway down Bed 2's left.
-const WALKWAY_U = [toU(0, 0.375), toU(1, 0.875)];
 
 // The point on a bed's loop nearest to somewhere on the ground.
 function nearestLoopU(x, z, bed) {
-  const lx = x - BED_CENTRES[bed];
+  const lx = x - BED_CENTRES[bed].x;
+  z -= BED_CENTRES[bed].z;
   const clamp = (v) => Math.min(Math.max(v / LOOP_HALF, -1), 1);
   const candidates = [
     { t: clamp(lx), side: 0, px: clamp(lx) * LOOP_HALF, pz: -LOOP_HALF },
@@ -1244,7 +1313,7 @@ function showStatusMessage(text) {
 // your figure walks there, round the path and across the walkway. Which bed you
 // are at limits nothing: anyone can still act on any plot.
 const BED_GLIDE_MS = 800;
-const BED_NAMES = ["the first bed", "the second bed"];
+const BED_NAMES = ["the first bed", "the second bed", "the third bed", "the fourth bed"];
 // A little above the far bed's middle, where its sign floats.
 const BED_SIGN_HEIGHT = 1.6;
 let currentBed = 0;
@@ -1258,7 +1327,8 @@ function bedOfPosition(position) {
 // null for open grass and the walkway between them.
 function bedAreaAt(x, z) {
   for (let bed = 0; bed < BEDS; bed++) {
-    if (Math.max(Math.abs(x - BED_CENTRES[bed]), Math.abs(z)) <= PATH_OUTER) return bed;
+    const centre = BED_CENTRES[bed];
+    if (Math.max(Math.abs(x - centre.x), Math.abs(z - centre.z)) <= PATH_OUTER) return bed;
   }
   return null;
 }
@@ -1268,11 +1338,17 @@ function goToBed(bed) {
   currentBed = bed;
   setHoveredBed(null);
 
-  // Look at the new bed from the far side, mirroring your view, so the bed you
-  // came from is now the one in the distance. Height and zoom stay as you had them.
+  // Look at the new bed from outside the square, across it towards the others, so
+  // they show in the distance. Height and zoom stay as you had them.
   const offset = camera.position.clone().sub(controls.target);
-  offset.x = -offset.x;
-  const toTarget = controls.target.clone().setX(BED_CENTRES[bed]);
+  const flat = Math.hypot(offset.x, offset.z);
+  const centre = BED_CENTRES[bed];
+  const outX = centre.x - GARDEN_CENTRE.x;
+  const outZ = centre.z - GARDEN_CENTRE.z;
+  const outLength = Math.hypot(outX, outZ);
+  offset.x = (outX / outLength) * flat;
+  offset.z = (outZ / outLength) * flat;
+  const toTarget = controls.target.clone().setX(centre.x).setZ(centre.z);
   glide = {
     start: performance.now(),
     fromTarget: controls.target.clone(),
@@ -1281,9 +1357,12 @@ function goToBed(bed) {
     toCamera: toTarget.clone().add(offset),
   };
 
-  // Walk to the near side of that bed's path, if you aren't there already.
+  // Walk to that bed's outside corner of the path, nearest where you are looking
+  // from, if you aren't there already.
   const mine = figures.get(me);
-  if (mine && bedOf(mine.target) !== bed) walkTo(toU(bed, 0.625));
+  if (mine && bedOf(mine.target) !== bed) {
+    walkTo(nearestLoopU(centre.x + outX * 10, centre.z + outZ * 10, bed));
+  }
 }
 
 function updateGlide(now) {
@@ -1484,47 +1563,48 @@ function alongDifference(a, b) {
 }
 
 // How far apart two spots are for a figure, in world units, counting the walk
-// round to the walkway and across it when they are at different beds. Used to
-// tell when a figure has drifted too far from where the server says it is.
+// round each bed to its walkway and across, bed by bed, when they are at different
+// beds. Used to tell when a figure has drifted too far from where the server says.
 function walkDistance(a, b) {
-  if (bedOf(a) === bedOf(b)) return Math.abs(alongDifference(a, b)) * LOOP_LENGTH;
-  const there = WALKWAY_U[bedOf(a)];
-  const back = WALKWAY_U[bedOf(b)];
-  return (
-    Math.abs(alongDifference(a, there)) * LOOP_LENGTH +
-    (WALKWAY_END - WALKWAY_START) +
-    Math.abs(alongDifference(back, b)) * LOOP_LENGTH
-  );
+  let distance = 0;
+  let here = a;
+  while (bedOf(here) !== bedOf(b)) {
+    const step = walkwayBetween(bedOf(here), nextBedTowards(bedOf(here), bedOf(b)));
+    distance += Math.abs(alongDifference(here, step.startU)) * LOOP_LENGTH + step.walkway.length;
+    here = step.endU;
+  }
+  return distance + Math.abs(alongDifference(here, b)) * LOOP_LENGTH;
 }
 
 // One frame's walk for a figure. Round its own bed it takes the shorter way. To
-// reach the other bed it walks round to the walkway, crosses it, then carries on
-// round to where it is going. Every browser works out the same walk from the same
-// u and target, so nothing extra goes to the server. Returns where it stands.
+// reach another bed it goes bed by bed the shorter way round the square: round to
+// the walkway, across it, and on. Every browser works out the same walk from the
+// same u and target, so nothing extra goes to the server. Returns where it stands.
 function stepFigure(figure, dt) {
   let budget = WALK_UNITS * dt;
 
-  // Partway across the walkway: keep going, then step onto the far loop.
+  // Partway across a walkway: keep going, then step onto the far loop.
   if (figure.crossing) {
     const crossing = figure.crossing;
-    const length = WALKWAY_END - WALKWAY_START;
-    crossing.progress = Math.min(1, crossing.progress + budget / length);
+    crossing.progress = Math.min(1, crossing.progress + budget / crossing.walkway.length);
     if (crossing.progress >= 1) {
       figure.crossing = null;
-      figure.u = WALKWAY_U[crossing.to];
+      figure.u = crossing.endU;
     }
-    const x = crossing.to === 1 ? WALKWAY_START + crossing.progress * length : WALKWAY_END - crossing.progress * length;
-    figure.heading = crossing.to === 1 ? 1 : -1;
-    return { walking: true, point: { x, z: 0 }, direction: { x: figure.heading, z: 0 } };
+    const dx = crossing.end.x - crossing.start.x;
+    const dz = crossing.end.z - crossing.start.z;
+    const point = { x: crossing.start.x + dx * crossing.progress, z: crossing.start.z + dz * crossing.progress };
+    return { walking: true, point, direction: { x: dx, z: dz } };
   }
 
-  // Going to the other bed: first to this bed's end of the walkway.
+  // Going to another bed: first round to this bed's end of the next walkway.
   const otherBed = bedOf(figure.target) !== bedOf(figure.u);
-  const goal = otherBed ? WALKWAY_U[bedOf(figure.u)] : figure.target;
+  const step = otherBed ? walkwayBetween(bedOf(figure.u), nextBedTowards(bedOf(figure.u), bedOf(figure.target))) : null;
+  const goal = step ? step.startU : figure.target;
   const diff = alongDifference(figure.u, goal);
   if (Math.abs(diff) <= 0.0005) {
-    if (otherBed) {
-      figure.crossing = { to: bedOf(figure.target), progress: 0 };
+    if (step) {
+      figure.crossing = { ...step, progress: 0 };
       return stepFigure(figure, dt);
     }
     return { walking: false, point: loopPoint(figure.u), direction: null };
@@ -1675,7 +1755,7 @@ function sendPresence() {
     headers: { "content-type": "application/json" },
     // Partway across the walkway the figure isn't on either loop, so say it is at
     // the end it is heading for: others see at most a small jump.
-    body: JSON.stringify({ u: mine.crossing ? WALKWAY_U[mine.crossing.to] : mine.u, target: mine.target }),
+    body: JSON.stringify({ u: mine.crossing ? mine.crossing.endU : mine.u, target: mine.target }),
   }).catch(() => {});
 }
 
@@ -1862,45 +1942,52 @@ renderer.domElement.addEventListener("pointerup", (event) => {
 // to go. null when the pointer is over the bed you are at, or nowhere near.
 let hoveredBed = null;
 
-// The sign over the bed you aren't at. Clicking it, or the bed, takes you there.
-const bedSign = document.getElementById("bed-sign");
-const bedSignLabel = bedSign.querySelector(".bed-sign-label");
+// A sign over each bed you aren't at. Clicking one, or its bed, takes you there.
+// The page has one sign as a template; each bed gets its own copy.
+const signTemplate = document.getElementById("bed-sign");
+const bedSigns = BED_CENTRES.map((_, bed) => {
+  const sign = signTemplate.cloneNode(true);
+  sign.removeAttribute("id");
+  sign.dataset.bed = String(bed);
+  const label = `Go to ${BED_NAMES[bed]}`;
+  sign.querySelector(".bed-sign-label").textContent = label;
+  sign.setAttribute("aria-label", label);
+  sign.addEventListener("click", () => goToBed(bed));
+  sign.addEventListener("pointerenter", () => setHoveredBed(bed));
+  sign.addEventListener("pointerleave", () => setHoveredBed(null));
+  signTemplate.after(sign);
+  return sign;
+});
+signTemplate.remove();
 const signPoint = new THREE.Vector3();
 
 function setHoveredBed(bed) {
   if (bed === hoveredBed) return;
   hoveredBed = bed;
   renderer.domElement.style.cursor = bed === null ? "" : "pointer";
-  bedSign.classList.toggle("is-hovered", bed !== null);
+  bedSigns.forEach((sign, i) => sign.classList.toggle("is-hovered", i === bed));
   bedBases.forEach((base, i) => {
     base.material.emissive.setHex(i === bed ? 0x3a2a14 : 0x000000);
   });
 }
 
-// Keep the sign over the far bed as the view moves, and hide it when that bed is
-// behind the camera or off the screen.
-function updateBedSign() {
-  const bed = currentBed === 0 ? 1 : 0;
-  signPoint.set(BED_CENTRES[bed], BED_SIGN_HEIGHT, 0).project(camera);
+// Keep each sign over its bed as the view moves, and hide it for the bed you are
+// at, while gliding, and when its bed is behind the camera or off the screen.
+function updateBedSigns() {
   const rect = renderer.domElement.getBoundingClientRect();
-  const x = rect.left + ((signPoint.x + 1) / 2) * rect.width;
-  const y = rect.top + ((1 - signPoint.y) / 2) * rect.height;
-  const visible = !glide && signPoint.z < 1 && x > rect.left && x < rect.right && y > rect.top && y < rect.bottom;
-  if (bedSign.hidden === visible) bedSign.hidden = !visible;
-  if (!visible) return;
-  bedSign.dataset.bed = String(bed);
-  const label = `Go to ${BED_NAMES[bed]}`;
-  if (bedSignLabel.textContent !== label) {
-    bedSignLabel.textContent = label;
-    bedSign.setAttribute("aria-label", label);
-  }
-  bedSign.style.left = `${x}px`;
-  bedSign.style.top = `${y}px`;
+  bedSigns.forEach((sign, bed) => {
+    const centre = BED_CENTRES[bed];
+    signPoint.set(centre.x, BED_SIGN_HEIGHT, centre.z).project(camera);
+    const x = rect.left + ((signPoint.x + 1) / 2) * rect.width;
+    const y = rect.top + ((1 - signPoint.y) / 2) * rect.height;
+    const visible =
+      bed !== currentBed && !glide && signPoint.z < 1 && x > rect.left && x < rect.right && y > rect.top && y < rect.bottom;
+    if (sign.hidden === visible) sign.hidden = !visible;
+    if (!visible) return;
+    sign.style.left = `${x}px`;
+    sign.style.top = `${y}px`;
+  });
 }
-
-bedSign.addEventListener("click", () => goToBed(Number(bedSign.dataset.bed)));
-bedSign.addEventListener("pointerenter", () => setHoveredBed(Number(bedSign.dataset.bed)));
-bedSign.addEventListener("pointerleave", () => setHoveredBed(null));
 
 function clearHoveredPlot() {
   if (hoveredPosition !== null) sceneObjects.get(hoveredPosition).soilMesh.scale.set(1, 1, 1);
@@ -1955,7 +2042,7 @@ function animate() {
   const now = performance.now();
   updateGlide(now);
   controls.update();
-  updateBedSign();
+  updateBedSigns();
   tickAnimations(now);
   updateRings(now);
   updateSky();
