@@ -1,6 +1,8 @@
 import type { PlantType, Plot, PlotState } from "./types.ts";
 
-export const GRID_SIZE = 25;
+// Two beds of 25 side by side: plots 0 to 24 are the first bed, 25 to 49 the
+// second. The first bed came first, so its plots keep their numbers.
+export const GRID_SIZE = 50;
 
 export const PLANT_TYPES = ["tree", "flower", "shrub"] as const;
 

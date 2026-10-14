@@ -45,8 +45,16 @@ describe("planting", () => {
     expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
   });
 
-  it("rejects a position outside the bed", async () => {
-    const { status } = await newVisitor(app.url).post(25, "plant");
+  it("plants in the second bed just as in the first", async () => {
+    const alice = newVisitor(app.url);
+    expect((await alice.post(30, "plant", { type: "flower" })).status).toBe(200);
+    expect((await alice.post(30, "water")).status).toBe(200);
+    expect(await plotAt(30)).toMatchObject({ plantType: "flower", plantedBy: publicId(alice.gid) });
+    expect((await newVisitor(app.url).post(30, "plant")).status).toBe(409);
+  });
+
+  it("rejects a position outside the beds", async () => {
+    const { status } = await newVisitor(app.url).post(50, "plant");
     expect(status).toBeGreaterThanOrEqual(400);
     expect(status).toBeLessThan(500);
   });

@@ -31,9 +31,12 @@ beforeAll(async () => {
       PRIMARY KEY (bed_id, position)
     );
   `);
+  // The one bed it had then: 25 plots, all empty but one.
+  const seed = old.prepare("INSERT INTO plots (bed_id, position, state) VALUES ('main', ?, 'empty')");
+  for (let position = 0; position < 25; position++) seed.run(position);
   old
     .prepare(
-      "INSERT INTO plots (bed_id, position, state, planted_at, planted_by, last_watered_at, last_watered_by) VALUES ('main', 3, 'planted', ?, 'old-visitor', ?, 'old-visitor')",
+      "UPDATE plots SET state = 'planted', planted_at = ?, planted_by = 'old-visitor', last_watered_at = ?, last_watered_by = 'old-visitor' WHERE position = 3",
     )
     .run(Date.now(), Date.now());
   old.close();
@@ -51,6 +54,13 @@ it("keeps a plant from before plant types existed, as a tree with its owner", as
   expect(plot.state).not.toBe("empty");
   expect(plot.plantType).toBe("tree");
   expect(plot.plantedBy).toBe(publicId("old-visitor"));
+});
+
+it("gains the second bed, empty, and leaves the first bed's plots where they were", async () => {
+  const plots = await readPlots(app.url);
+  expect(plots.map((p) => p.position)).toEqual([...Array(50).keys()]);
+  expect(plots.filter((p) => p.position >= 25).every((p) => p.state === "empty")).toBe(true);
+  expect(plots.filter((p) => p.state !== "empty").map((p) => p.position)).toEqual([3]);
 });
 
 it("still lets the migrated garden take a new kind of plant", async () => {
