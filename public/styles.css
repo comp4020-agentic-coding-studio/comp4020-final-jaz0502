@@ -337,6 +337,12 @@ body {
   animation: bed-sign-bob 2.4s ease-in-out infinite;
 }
 
+/* display: flex above would otherwise override the hidden attribute, leaving a
+   sign showing over the bed you are at. */
+.bed-sign[hidden] {
+  display: none;
+}
+
 /* A gold pointer under the sign, like the one over your own figure, pointing
    down at the bed. */
 .bed-sign::after {
