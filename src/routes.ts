@@ -3,6 +3,7 @@ import { recordActivity } from "./activity.ts";
 import * as db from "./db.ts";
 import { DAY_LENGTH_MS, WILT_WINDOW_MS, derivePlot, isPlantType } from "./garden.ts";
 import { getOrSetIdentity, publicId } from "./identity.ts";
+import { allowAction } from "./limits.ts";
 import { logEvent } from "./log.ts";
 import { renderPage } from "./page.ts";
 import { move as moveGardener, wave as waveGardener } from "./presence.ts";
@@ -199,6 +200,19 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
   if (req.method === "POST" && actionMatch) {
     const position = Number(actionMatch[1]);
     const action = actionMatch[2] as "plant" | "water" | "compost";
+
+    // Only so many actions a moment, whatever they are: checked first, so a flood is
+    // turned away before anything is read or done. It is logged once for the
+    // window, so a flood cannot flood the log.
+    const limit = allowAction(publicId(identity), Date.now());
+    if (!limit.ok) {
+      if (limit.firstRefusal) {
+        logEvent(publicId(identity), action, { plot: position, result: "refused", reason: "rate-limited" });
+      }
+      res.writeHead(429, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "Slow down: too many actions, try again in a few seconds" }));
+      return;
+    }
 
     // Which plant to put in: the optional body's `type`, a tree if there is none.
     let plantType: PlantType = "tree";
