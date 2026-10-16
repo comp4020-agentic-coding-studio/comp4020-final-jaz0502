@@ -22,7 +22,7 @@ export const BEDS: readonly Bed[] = [
   { name: "The Cottage Garden", takes: null, takesText: "any plant" },
   { name: "The Flower Garden", takes: ["flower", "shrub"], takesText: "flowers and flower shrubs" },
   { name: "The Fruit Garden", takes: ["tree"], takesText: "fruit trees" },
-  { name: "Bed 4", takes: null, takesText: "any plant" },
+  { name: "The Vegetable Garden", takes: ["vegetable"], takesText: "vegetables" },
 ];
 
 const BED_PLOTS = GRID_SIZE / BEDS.length;
