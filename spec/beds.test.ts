@@ -4,8 +4,10 @@ import { type PrivateApp, newVisitor, openStream, readPlots, sleep, startApp } f
 
 // Each bed takes only what it is for. The server decides, so a request sent by hand
 // gets the same answer as a click in the page. Only planting is restricted: anyone
-// may water or compost in any bed. Plots 25 to 49 are The Flower Garden.
+// may water or compost in any bed. Plots 25 to 49 are The Flower Garden and 50 to 74
+// The Fruit Garden.
 const FLOWER_GARDEN = [25, 49];
+const FRUIT_GARDEN = [50, 74];
 
 let app: PrivateApp;
 beforeAll(async () => {
@@ -58,13 +60,44 @@ describe("The Flower Garden", () => {
   });
 });
 
-describe("the beds that take anything", () => {
-  it("still take a tree, a flower and a flower shrub", async () => {
+describe("The Fruit Garden", () => {
+  it("takes a fruit tree, which is the tree, and nothing else", async () => {
+    const alice = newVisitor(app.url);
+    expect((await alice.post(51, "plant", { type: "tree" })).status).toBe(200);
+    // The default plant is a tree, so leaving the type out is a fruit tree.
+    expect((await alice.post(52, "plant")).status).toBe(200);
+    expect(await plotAt(52)).toMatchObject({ plantType: "tree" });
+
+    for (const type of ["flower", "shrub"]) {
+      const refused = await alice.post(55, "plant", { type });
+      expect(refused.status).toBe(409);
+      expect((refused.body as unknown as { error: string }).error).toMatch(/Fruit Garden only takes fruit trees/);
+    }
+    expect((await plotAt(55)).state).toBe("empty");
+  });
+
+  it("is turned away at both ends of the bed, and not beyond it", async () => {
+    const alice = newVisitor(app.url);
+    expect((await alice.post(FRUIT_GARDEN[0], "plant", { type: "flower" })).status).toBe(409);
+    expect((await alice.post(FRUIT_GARDEN[1], "plant", { type: "flower" })).status).toBe(409);
+    expect((await alice.post(FRUIT_GARDEN[0] - 1, "plant", { type: "tree" })).status).toBe(409); // the Flower Garden
+    expect((await alice.post(FRUIT_GARDEN[1] + 1, "plant", { type: "flower" })).status).toBe(200);
+  });
+
+  it("lets anyone water there", async () => {
+    const alice = newVisitor(app.url);
+    const bob = newVisitor(app.url);
+    await alice.post(60, "plant", { type: "tree" });
+    expect((await bob.post(60, "water")).status).toBe(200);
+  });
+});
+
+describe("the bed that still takes anything", () => {
+  it("takes a tree, a flower and a flower shrub", async () => {
     const alice = newVisitor(app.url);
     expect((await alice.post(10, "plant", { type: "tree" })).status).toBe(200);
     expect((await alice.post(11, "plant", { type: "flower" })).status).toBe(200);
     expect((await alice.post(12, "plant", { type: "shrub" })).status).toBe(200);
-    expect((await alice.post(60, "plant", { type: "tree" })).status).toBe(200);
     expect((await alice.post(80, "plant", { type: "tree" })).status).toBe(200);
   });
 });
@@ -100,7 +133,8 @@ describe("what the page is told", () => {
       };
       expect(hello.beds).toHaveLength(4);
       expect(hello.beds[1]).toEqual({ name: "The Flower Garden", takes: ["flower", "shrub"] });
-      expect(hello.beds.filter((b) => b.takes === null)).toHaveLength(3);
+      expect(hello.beds[2]).toEqual({ name: "The Fruit Garden", takes: ["tree"] });
+      expect(hello.beds.filter((b) => b.takes === null)).toHaveLength(2);
     } finally {
       stream.close();
     }

@@ -20,7 +20,7 @@ export function renderPage(): string {
       <p id="bed-here" class="bed-here"></p>
       <div id="plant-picker" role="radiogroup" aria-label="Choose what to plant">
         <p class="panel-label">What to plant</p>
-        <button type="button" role="radio" aria-checked="true" data-type="tree"><span class="chip chip-tree"></span>Tree</button>
+        <button type="button" role="radio" aria-checked="true" data-type="tree"><span class="chip chip-tree"></span>Fruit tree</button>
         <button type="button" role="radio" aria-checked="false" data-type="flower"><span class="chip chip-flower"></span>Flower</button>
         <button type="button" role="radio" aria-checked="false" data-type="shrub"><span class="chip chip-shrub"></span>Flower shrub</button>
       </div>

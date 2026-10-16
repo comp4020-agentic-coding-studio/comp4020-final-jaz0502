@@ -47,11 +47,13 @@ describe("planting", () => {
 
   it("plants in the other beds just as in the first", async () => {
     const alice = newVisitor(app.url);
-    for (const position of [30, 60, 99]) {
-      expect((await alice.post(position, "plant", { type: "flower" })).status).toBe(200);
+    // A plant each bed takes: a flower in The Flower Garden, a tree in The Fruit Garden,
+    // and anything in the rest.
+    for (const [position, type] of [[30, "flower"], [60, "tree"], [99, "flower"]] as const) {
+      expect((await alice.post(position, "plant", { type })).status).toBe(200);
       expect((await alice.post(position, "water")).status).toBe(200);
-      expect(await plotAt(position)).toMatchObject({ plantType: "flower", plantedBy: publicId(alice.gid) });
-      expect((await newVisitor(app.url).post(position, "plant")).status).toBe(409);
+      expect(await plotAt(position)).toMatchObject({ plantType: type, plantedBy: publicId(alice.gid) });
+      expect((await newVisitor(app.url).post(position, "plant", { type })).status).toBe(409);
     }
   });
 

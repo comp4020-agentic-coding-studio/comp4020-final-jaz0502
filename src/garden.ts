@@ -21,7 +21,7 @@ export interface Bed {
 export const BEDS: readonly Bed[] = [
   { name: "Bed 1", takes: null, takesText: "any plant" },
   { name: "The Flower Garden", takes: ["flower", "shrub"], takesText: "flowers and flower shrubs" },
-  { name: "Bed 3", takes: null, takesText: "any plant" },
+  { name: "The Fruit Garden", takes: ["tree"], takesText: "fruit trees" },
   { name: "Bed 4", takes: null, takesText: "any plant" },
 ];
 

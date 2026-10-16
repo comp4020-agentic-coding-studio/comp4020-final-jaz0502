@@ -28,7 +28,7 @@ const THIRSTY_FRACTION = 0.25;
 
 const PLANT_TYPES = ["tree", "flower", "shrub"];
 
-const PLANT_NAME = { tree: "Tree", flower: "Flower", shrub: "Flower shrub" };
+const PLANT_NAME = { tree: "Fruit tree", flower: "Flower", shrub: "Flower shrub" };
 
 // The same four growth stages mean different things for each plant.
 const STAGE_LABEL = {
