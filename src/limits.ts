@@ -23,7 +23,9 @@ interface Window {
 
 const windows = new Map<string, Window>();
 
-export type ActionResult = { ok: true } | { ok: false; firstRefusal: boolean };
+// When refused, how long until the window ends and the person can act again, so
+// the page can wait instead of sending clicks it knows will be turned away.
+export type ActionResult = { ok: true } | { ok: false; firstRefusal: boolean; retryAfterMs: number };
 
 export function allowAction(id: string, now: number): ActionResult {
   let entry = windows.get(id);
@@ -40,7 +42,7 @@ export function allowAction(id: string, now: number): ActionResult {
 
   const firstRefusal = !entry.reported;
   entry.reported = true;
-  return { ok: false, firstRefusal };
+  return { ok: false, firstRefusal, retryAfterMs: Math.max(0, entry.start + ACTION_WINDOW_MS - now) };
 }
 
 // Forget everyone whose window has ended, and if that is not enough, the oldest.

@@ -209,7 +209,10 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
       if (limit.firstRefusal) {
         logEvent(publicId(identity), action, { plot: position, result: "refused", reason: "rate-limited" });
       }
-      res.writeHead(429, { "content-type": "application/json" });
+      res.writeHead(429, {
+        "content-type": "application/json",
+        "retry-after": String(Math.max(1, Math.ceil(limit.retryAfterMs / 1000))),
+      });
       res.end(JSON.stringify({ error: "Slow down: too many actions, try again in a few seconds" }));
       return;
     }

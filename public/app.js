@@ -1881,6 +1881,10 @@ function ndcFromEvent(event) {
   );
 }
 
+// When the server last told this browser to slow down, until when to hold off.
+let actionsPausedUntil = 0;
+const SLOW_DOWN_MESSAGE = "Slow down: too many actions, try again in a few seconds";
+
 async function handlePointerClick(event) {
   raycaster.setFromCamera(ndcFromEvent(event), camera);
   const hit = raycaster.intersectObjects(soilMeshes, false)[0];
@@ -1909,6 +1913,13 @@ async function handlePointerClick(event) {
   const state = plots.get(position)?.state ?? "empty";
   const action = actionFor(state);
 
+  // The server has said to slow down: wait until it says to try again, rather than
+  // sending clicks it will only turn away.
+  if (Date.now() < actionsPausedUntil) {
+    showStatusMessage(SLOW_DOWN_MESSAGE);
+    return;
+  }
+
   try {
     const res =
       action === "plant"
@@ -1920,6 +1931,10 @@ async function handlePointerClick(event) {
         : await fetch(`/api/plots/${position}/${action}`, { method: "POST" });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
+      if (res.status === 429) {
+        const seconds = Number(res.headers.get("retry-after"));
+        actionsPausedUntil = Date.now() + (Number.isFinite(seconds) && seconds > 0 ? seconds : 5) * 1000;
+      }
       showStatusMessage(body.error ?? "That action isn't valid for this plot right now.");
     }
   } catch {

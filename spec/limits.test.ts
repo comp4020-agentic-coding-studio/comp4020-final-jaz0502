@@ -40,6 +40,20 @@ describe("the limit on plot actions", () => {
     expect((refused.body as unknown as { error: string }).error).toMatch(/slow down/i);
   });
 
+  it("tells the browser when to try again, so it can wait instead of asking", async () => {
+    const alice = newVisitor(app.url);
+    await statuses(alice, [16, 17, 18, 19, 21]);
+    const res = await fetch(new URL("/api/plots/22/plant", app.url), {
+      method: "POST",
+      headers: { cookie: `gid=${alice.gid}`, connection: "close" },
+    });
+    expect(res.status).toBe(429);
+    const seconds = Number(res.headers.get("retry-after"));
+    expect(Number.isInteger(seconds)).toBe(true);
+    expect(seconds).toBeGreaterThanOrEqual(1);
+    expect(seconds).toBeLessThanOrEqual(Math.ceil(WINDOW_MS / 1000));
+  });
+
   it("counts refused attempts too, so hammering a plot you can't act on is stopped", async () => {
     const alice = newVisitor(app.url);
     await alice.post(20, "plant");
