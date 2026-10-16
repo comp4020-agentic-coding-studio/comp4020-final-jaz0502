@@ -17,6 +17,7 @@ export function renderPage(): string {
       <button type="button" id="panel-toggle" class="panel-toggle" aria-expanded="true" aria-controls="panel-body">Hide</button>
     </div>
     <div id="panel-body" class="panel-body">
+      <p id="bed-here" class="bed-here"></p>
       <div id="plant-picker" role="radiogroup" aria-label="Choose what to plant">
         <p class="panel-label">What to plant</p>
         <button type="button" role="radio" aria-checked="true" data-type="tree"><span class="chip chip-tree"></span>Tree</button>

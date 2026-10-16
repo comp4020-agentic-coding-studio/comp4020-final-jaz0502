@@ -3,7 +3,7 @@ import { type Activity, recentActivity } from "./activity.ts";
 import type { GardenerStats } from "./db.ts";
 import { logEvent } from "./log.ts";
 import { type Gardener, connect, disconnect, listGardeners } from "./presence.ts";
-import type { Plot, PlotState } from "./types.ts";
+import type { PlantType, Plot, PlotState } from "./types.ts";
 
 // Sent once, first, on connect. `you` is the viewer's own public id so the
 // client can tell which plots they tended without any per-client payloads;
@@ -14,6 +14,8 @@ export interface Hello {
   wiltWindowMs: number;
   dayLengthMs: number;
   serverNow: number;
+  // Each bed's name and what it takes (null for any plant), in plot order.
+  beds: { name: string; takes: readonly PlantType[] | null }[];
 }
 
 type SseEvent =

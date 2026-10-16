@@ -64,20 +64,20 @@ describe("the limit on plot actions", () => {
 
   it("lets a person act again once the window has passed", { timeout: 15_000 }, async () => {
     const alice = newVisitor(app.url);
-    await statuses(alice, [30, 31, 32, 33, 34]);
-    expect((await alice.post(35, "plant")).status).toBe(429);
+    await statuses(alice, [5, 6, 7, 8, 9]);
+    expect((await alice.post(24, "plant")).status).toBe(429);
 
     await sleep(WINDOW_MS + 300);
-    expect((await alice.post(35, "plant")).status).toBe(200);
+    expect((await alice.post(24, "plant")).status).toBe(200);
   });
 
   it("is each person's own: one person's flood never stops another", async () => {
     const flooder = newVisitor(app.url);
     const other = newVisitor(app.url);
-    await statuses(flooder, [40, 41, 42, 43, 44, 45, 46]);
-    expect((await flooder.post(47, "plant")).status).toBe(429);
+    await statuses(flooder, [0, 1, 2, 3, 4, 22, 23]);
+    expect((await flooder.post(21, "plant")).status).toBe(429);
 
-    expect((await other.post(48, "plant")).status).toBe(200);
+    expect((await other.post(70, "plant")).status).toBe(200);
   });
 
   it("covers water and compost as well as plant", async () => {

@@ -7,6 +7,36 @@ export const GRID_SIZE = 100;
 
 export const PLANT_TYPES = ["tree", "flower", "shrub"] as const;
 
+// What each bed is called and what it takes, in the order of the plots. A bed with
+// `takes: null` takes any plant. This is the one place that says so: the server
+// enforces it, and the page reads it from the opening `hello` and only follows.
+// Only planting is restricted: anyone may water or compost in any bed.
+export interface Bed {
+  name: string;
+  takes: readonly PlantType[] | null;
+  // The same in words, for the message when a plant is turned away.
+  takesText: string;
+}
+
+export const BEDS: readonly Bed[] = [
+  { name: "Bed 1", takes: null, takesText: "any plant" },
+  { name: "The Flower Garden", takes: ["flower", "shrub"], takesText: "flowers and flower shrubs" },
+  { name: "Bed 3", takes: null, takesText: "any plant" },
+  { name: "Bed 4", takes: null, takesText: "any plant" },
+];
+
+const BED_PLOTS = GRID_SIZE / BEDS.length;
+
+// The bed a plot is in, or undefined for a position that is not a plot at all.
+export function bedAt(position: number): Bed | undefined {
+  if (!Number.isInteger(position) || position < 0 || position >= GRID_SIZE) return undefined;
+  return BEDS[Math.floor(position / BED_PLOTS)];
+}
+
+export function bedTakes(bed: Bed, plantType: PlantType): boolean {
+  return bed.takes === null || bed.takes.includes(plantType);
+}
+
 export function isPlantType(value: unknown): value is PlantType {
   return typeof value === "string" && (PLANT_TYPES as readonly string[]).includes(value);
 }

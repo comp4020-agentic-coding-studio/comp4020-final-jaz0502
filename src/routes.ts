@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { recordActivity } from "./activity.ts";
 import * as db from "./db.ts";
-import { DAY_LENGTH_MS, WILT_WINDOW_MS, derivePlot, isPlantType } from "./garden.ts";
+import { BEDS, DAY_LENGTH_MS, WILT_WINDOW_MS, bedAt, bedTakes, derivePlot, isPlantType } from "./garden.ts";
 import { getOrSetIdentity, publicId } from "./identity.ts";
 import { allowAction } from "./limits.ts";
 import { logEvent } from "./log.ts";
@@ -144,6 +144,7 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
         wiltWindowMs: WILT_WINDOW_MS,
         dayLengthMs: DAY_LENGTH_MS,
         serverNow: Date.now(),
+        beds: BEDS.map(({ name, takes }) => ({ name, takes })),
       },
       publicId(identity),
       db.getStats(publicId(identity)),
@@ -230,6 +231,21 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
         return;
       }
       plantType = requested;
+
+      // Each bed takes only what it is for. A position that is not a plot at all
+      // is left to the usual refusal below.
+      const bed = bedAt(position);
+      if (bed && !bedTakes(bed, plantType)) {
+        logEvent(publicId(identity), "plant", {
+          plot: position,
+          type: plantType,
+          result: "refused",
+          reason: "wrong-bed",
+        });
+        res.writeHead(409, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: `${bed.name} only takes ${bed.takesText}.` }));
+        return;
+      }
     }
 
     const result =

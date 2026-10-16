@@ -90,6 +90,23 @@ body {
   color: #4b5e45;
 }
 
+/* Where you are, and what that garden takes. */
+.bed-here {
+  margin: 0 0 0.7rem;
+  font-weight: 600;
+}
+
+.bed-here small {
+  display: block;
+  font-weight: 400;
+  font-size: 0.8rem;
+  color: #3b4d37;
+}
+
+#plant-picker button[hidden] {
+  display: none;
+}
+
 #plant-picker {
   display: flex;
   flex-direction: column;

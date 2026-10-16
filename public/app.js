@@ -1269,7 +1269,7 @@ let selectedType = readStoredType();
 
 function describePlot(plot) {
   if (plot.state === "empty") {
-    return `Empty plot — click to plant a ${PLANT_NAME[selectedType].toLowerCase()}`;
+    return `Empty plot — click to plant a ${PLANT_NAME[plantHere(bedOfPosition(plot.position))].toLowerCase()}`;
   }
   const type = plot.plantType ?? "tree";
   if (plot.state === "wilted") return `${PLANT_NAME[type]}, wilted — needs composting`;
@@ -1313,7 +1313,10 @@ function showStatusMessage(text) {
 // your figure walks there, round the path and across the walkway. Which bed you
 // are at limits nothing: anyone can still act on any plot.
 const BED_GLIDE_MS = 800;
-const BED_NAMES = ["the first bed", "the second bed", "the third bed", "the fourth bed"];
+// What each bed is called and takes comes from the server in the opening `hello`:
+// the server decides, and the page only follows. Until it has spoken, beds are
+// numbered and take anything.
+let beds = Array.from({ length: BEDS }, (_, i) => ({ name: `Bed ${i + 1}`, takes: null }));
 // A little above the far bed's middle, where its sign floats.
 const BED_SIGN_HEIGHT = 1.6;
 let currentBed = 0;
@@ -1337,6 +1340,7 @@ function goToBed(bed) {
   if (bed === currentBed) return;
   currentBed = bed;
   setHoveredBed(null);
+  renderBedHere();
 
   // Look at the new bed from outside the square, across it towards the others, so
   // they show in the distance. Height and zoom stay as you had them.
@@ -1380,7 +1384,7 @@ const pickerButtons = [...picker.querySelectorAll("[data-type]")];
 function setSelectedType(type, remember) {
   selectedType = type;
   for (const button of pickerButtons) {
-    button.setAttribute("aria-checked", String(button.dataset.type === type));
+    button.setAttribute("aria-checked", String(button.dataset.type === plantHere()));
   }
   if (remember) {
     try {
@@ -1391,6 +1395,33 @@ function setSelectedType(type, remember) {
   }
   if (hoveredPosition !== null) refreshStatusBarForHover(plots.get(hoveredPosition));
 }
+
+// What a click on an empty plot plants in the bed you are at: your own choice if
+// the bed takes it, otherwise the first thing it does take.
+function plantHere(bed = currentBed) {
+  const takes = beds[bed].takes;
+  if (takes === null || takes.includes(selectedType)) return selectedType;
+  return takes[0];
+}
+
+// Show where you are and only the plants this bed takes, with your own choice kept
+// for when you are back in a bed that takes it.
+const bedHere = document.getElementById("bed-here");
+function renderBedHere() {
+  const { name, takes } = beds[currentBed];
+  bedHere.replaceChildren(document.createTextNode(`You are in ${name}`));
+  if (takes !== null) {
+    const small = document.createElement("small");
+    small.textContent = `Takes ${takes.map((type) => PLANT_NAME[type].toLowerCase()).join(" and ")}`;
+    bedHere.append(small);
+  }
+  for (const button of pickerButtons) {
+    button.hidden = takes !== null && !takes.includes(button.dataset.type);
+    button.setAttribute("aria-checked", String(button.dataset.type === plantHere()));
+  }
+  if (hoveredPosition !== null) refreshStatusBarForHover(plots.get(hoveredPosition));
+}
+renderBedHere();
 
 picker.addEventListener("click", (event) => {
   const button = event.target.closest("[data-type]");
@@ -1827,6 +1858,9 @@ function connect() {
     wiltWindowMs = hello.wiltWindowMs;
     dayLengthMs = hello.dayLengthMs;
     clockOffset = hello.serverNow - Date.now();
+    if (Array.isArray(hello.beds) && hello.beds.length === BEDS) beds = hello.beds;
+    renderBedSigns();
+    renderBedHere();
     renderYou();
   });
   source.addEventListener("snapshot", (event) => {
@@ -1926,7 +1960,7 @@ async function handlePointerClick(event) {
         ? await fetch(`/api/plots/${position}/plant`, {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ type: selectedType }),
+            body: JSON.stringify({ type: plantHere() }),
           })
         : await fetch(`/api/plots/${position}/${action}`, { method: "POST" });
     if (!res.ok) {
@@ -1964,9 +1998,6 @@ const bedSigns = BED_CENTRES.map((_, bed) => {
   const sign = signTemplate.cloneNode(true);
   sign.removeAttribute("id");
   sign.dataset.bed = String(bed);
-  const label = `Go to ${BED_NAMES[bed]}`;
-  sign.querySelector(".bed-sign-label").textContent = label;
-  sign.setAttribute("aria-label", label);
   sign.addEventListener("click", () => goToBed(bed));
   sign.addEventListener("pointerenter", () => setHoveredBed(bed));
   sign.addEventListener("pointerleave", () => setHoveredBed(null));
@@ -1975,6 +2006,16 @@ const bedSigns = BED_CENTRES.map((_, bed) => {
 });
 signTemplate.remove();
 const signPoint = new THREE.Vector3();
+
+// Label each sign with its bed's name, once the server has given the names.
+function renderBedSigns() {
+  bedSigns.forEach((sign, bed) => {
+    const label = `Go to ${beds[bed].name}`;
+    sign.querySelector(".bed-sign-label").textContent = label;
+    sign.setAttribute("aria-label", label);
+  });
+}
+renderBedSigns();
 
 function setHoveredBed(bed) {
   if (bed === hoveredBed) return;
