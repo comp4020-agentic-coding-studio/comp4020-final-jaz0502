@@ -26,9 +26,9 @@ const WATER_DURATION_MS = 900;
 // The last quarter of a plot's wilt window counts as "thirsty".
 const THIRSTY_FRACTION = 0.25;
 
-const PLANT_TYPES = ["tree", "flower", "sunflower", "shrub", "vegetable"];
+const PLANT_TYPES = ["tree", "flower", "sunflower", "shrub", "vegetable", "tomato", "lettuce"];
 
-const PLANT_NAME = { tree: "Fruit tree", flower: "Tulip", sunflower: "Sunflower", shrub: "Flower shrub", vegetable: "Vegetable" };
+const PLANT_NAME = { tree: "Fruit tree", flower: "Tulip", sunflower: "Sunflower", shrub: "Flower shrub", vegetable: "Carrot", tomato: "Tomato", lettuce: "Lettuce" };
 
 // The same four growth stages mean different things for each plant.
 const STAGE_LABEL = {
@@ -36,7 +36,9 @@ const STAGE_LABEL = {
   flower: { planted: "just planted", sprout: "sprouting", growing: "budding", mature: "in bloom" }, // the tulip
   sunflower: { planted: "just planted", sprout: "sprouting", growing: "growing", mature: "in bloom" },
   shrub: { planted: "just planted", sprout: "sprouting", growing: "growing", mature: "in flower" },
-  vegetable: { planted: "just planted", sprout: "sprouting", growing: "growing", mature: "ready to pick" },
+  vegetable: { planted: "just planted", sprout: "sprouting", growing: "growing", mature: "ready to pick" }, // the carrot
+  tomato: { planted: "just planted", sprout: "sprouting", growing: "growing", mature: "ripe" },
+  lettuce: { planted: "just planted", sprout: "sprouting", growing: "growing", mature: "ready to pick" },
 };
 
 const PALETTE = {
@@ -48,6 +50,8 @@ const PALETTE = {
   seedShrub: 0x5f8f4a,
   seedSunflower: 0x4a4038,
   seedVegetable: 0xc9a36b,
+  seedTomato: 0xe3d3a0,
+  seedLettuce: 0x7a6a4a,
   stemSprout: 0x6a9b46,
   foliageSprout: 0x8fc45f,
   trunk: 0x6b4423,
@@ -68,6 +72,13 @@ const PALETTE = {
   vegTop: 0x4f9e3a,
   vegTopLight: 0x78bf4a,
   carrot: 0xe8873a,
+  tomatoRed: 0xe0392b,
+  tomatoGreen: 0x8fbf4a,
+  tomatoVine: 0x3f8f3a,
+  stake: 0x8a6b4f,
+  lettuce: 0x8fd14f,
+  lettuceDeep: 0x5fae3a,
+  lettuceLight: 0xb7e57a,
   wiltedWood: 0x8a6b4f,
   wiltedFoliage: 0xab8f66,
 };
@@ -167,7 +178,11 @@ function buildSeeds(type) {
         ? PALETTE.seedSunflower
         : type === "shrub"
         ? PALETTE.seedShrub
-        : type === "vegetable"
+        : type === "tomato"
+          ? PALETTE.seedTomato
+          : type === "lettuce"
+            ? PALETTE.seedLettuce
+            : type === "vegetable"
           ? PALETTE.seedVegetable
           : PALETTE.seedTree;
   for (let i = 0; i < 3; i++) {
@@ -196,6 +211,19 @@ function buildSprout(type) {
   } else if (type === "shrub") {
     group.add(part(new THREE.SphereGeometry(0.1, 6, 5), PALETTE.shrubLeaf, -0.05, 0.08, 0));
     group.add(part(new THREE.SphereGeometry(0.08, 6, 5), PALETTE.shrubLeafLight, 0.07, 0.07, 0.03));
+  } else if (type === "tomato") {
+    group.add(part(new THREE.CylinderGeometry(0.02, 0.025, 0.2, 6), PALETTE.tomatoVine, 0, 0.1, 0));
+    for (const side of [-1, 1]) {
+      const leaf = part(new THREE.SphereGeometry(0.055, 6, 4), PALETTE.vegTopLight, side * 0.06, 0.2, 0);
+      leaf.scale.set(1, 0.4, 0.8);
+      group.add(leaf);
+    }
+  } else if (type === "lettuce") {
+    for (const side of [-1, 1]) {
+      const leaf = part(new THREE.SphereGeometry(0.07, 6, 4), PALETTE.lettuceLight, side * 0.05, 0.05, 0);
+      leaf.scale.set(1, 0.35, 0.8);
+      group.add(leaf);
+    }
   } else if (type === "vegetable") {
     // Two small feathery tufts just up out of the soil.
     for (const side of [-1, 1]) {
@@ -342,6 +370,47 @@ function buildVegetable(mature) {
   return group;
 }
 
+// A tomato: a vine tied to a wooden stake, with red fruit hanging on it once it is
+// ripe and a few green ones before that.
+function buildTomato(mature) {
+  const group = new THREE.Group();
+  const height = mature ? 0.62 : 0.42;
+  group.add(part(new THREE.CylinderGeometry(0.014, 0.014, height + 0.1, 5), PALETTE.stake, 0.07, (height + 0.1) / 2, 0));
+  group.add(part(new THREE.CylinderGeometry(0.02, 0.026, height, 6), PALETTE.tomatoVine, 0, height / 2, 0));
+  const clumps = mature ? 4 : 3;
+  for (let i = 0; i < clumps; i++) {
+    const y = 0.12 + (i * (height - 0.14)) / clumps;
+    const side = i % 2 === 0 ? -1 : 1;
+    const leaf = part(new THREE.SphereGeometry(0.085, 6, 4), i % 2 === 0 ? PALETTE.vegTop : PALETTE.vegTopLight, side * 0.08, y, 0.02);
+    leaf.scale.set(1, 0.5, 0.8);
+    group.add(leaf);
+  }
+  const fruit = mature ? [[-0.1, 0.22, 0.05], [0.04, 0.32, 0.07], [-0.07, 0.42, -0.03], [0.09, 0.17, -0.04]] : [[-0.07, 0.2, 0.05], [0.05, 0.3, 0.05]];
+  for (const [x, y, z] of fruit) {
+    group.add(part(new THREE.SphereGeometry(mature ? 0.052 : 0.032, 7, 5), mature ? PALETTE.tomatoRed : PALETTE.tomatoGreen, x, y, z));
+  }
+  return group;
+}
+
+// A lettuce: a low, ruffled head of overlapping leaves in rings, fuller and paler
+// at the heart when it is ready to pick.
+function buildLettuce(mature) {
+  const group = new THREE.Group();
+  const rings = mature ? 3 : 2;
+  for (let ring = 0; ring < rings; ring++) {
+    const count = 6 - ring;
+    const radius = (mature ? 0.14 : 0.1) * (1 - ring * 0.32);
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2 + ring * 0.5;
+      const colour = ring === 0 ? PALETTE.lettuceDeep : ring === 1 ? PALETTE.lettuce : PALETTE.lettuceLight;
+      const leaf = part(new THREE.SphereGeometry(mature ? 0.11 : 0.08, 7, 5), colour, Math.cos(angle) * radius, 0.07 + ring * 0.06, Math.sin(angle) * radius);
+      leaf.scale.set(1, 0.6, 1);
+      group.add(leaf);
+    }
+  }
+  return group;
+}
+
 // wilted: a collapsed, drooping, brown version of whichever plant it was.
 function buildWilted(type) {
   const group = new THREE.Group();
@@ -360,6 +429,17 @@ function buildWilted(type) {
     bush.scale.y = 0.5;
     group.add(bush);
     group.scale.setScalar(0.85);
+  } else if (type === "tomato") {
+    group.add(part(new THREE.CylinderGeometry(0.014, 0.014, 0.5, 5), PALETTE.stake, 0.07, 0.25, 0));
+    group.add(part(new THREE.CylinderGeometry(0.02, 0.026, 0.3, 6), PALETTE.wiltedWood, 0, 0.15, 0));
+    group.add(part(new THREE.SphereGeometry(0.045, 6, 4), PALETTE.wiltedFoliage, -0.1, 0.1, 0.03));
+    group.rotation.z = 0.35;
+  } else if (type === "lettuce") {
+    for (let i = 0; i < 5; i++) {
+      const leaf = part(new THREE.SphereGeometry(0.1, 7, 4), PALETTE.wiltedFoliage, Math.cos(i * 1.3) * 0.1, 0.03, Math.sin(i * 1.3) * 0.1);
+      leaf.scale.set(1, 0.25, 1);
+      group.add(leaf);
+    }
   } else if (type === "vegetable") {
     // The leaves flop over, brown.
     for (let i = 0; i < 4; i++) {
@@ -390,6 +470,8 @@ function buildPlant(type, state) {
   if (type === "sunflower") return buildSunflower(mature);
   if (type === "shrub") return buildShrub(mature);
   if (type === "vegetable") return buildVegetable(mature);
+  if (type === "tomato") return buildTomato(mature);
+  if (type === "lettuce") return buildLettuce(mature);
   return buildTree(mature);
 }
 
@@ -668,51 +750,71 @@ const bedBases = BED_CENTRES.map((centre) => {
   return bedBase;
 });
 
-// A low white picket fence round The Flower Garden's base, with a gap where each
-// walkway meets it. It is only for show: it stands between the plots and the path
-// and never limits what anyone can do.
-const FENCE_BED = 1;
+// A low fence round a bed's base, with a gap where each walkway meets it. Each bed
+// can have its own kind. They are only for show: a fence stands between the plots
+// and the path and never limits what anyone can do.
 const FENCE_HALF = 2.64;
 const FENCE_BASE_Y = -0.15;
 const FENCE_GAP_HALF = 0.85;
-const FENCE_POST_STEP = 0.3;
-// Pure white, with a little glow of its own so the shaded sides do not read grey.
-const fenceMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.14, flatShading: true });
-const fencePostGeometry = new THREE.BoxGeometry(0.07, 0.34, 0.07);
-const fenceCapGeometry = new THREE.ConeGeometry(0.06, 0.07, 4);
 
-// `gaps` is the set of sides with a walkway: "back", "right", "front" or "left".
-function buildFence(bed, gaps) {
+// Which bed has which fence, and the sides of each that a walkway leaves from.
+const FENCES = { 1: "picket", 3: "wattle" };
+
+// Pure white, with a little glow of its own so the shaded sides do not read grey.
+const picketMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.14, flatShading: true });
+const picketPostGeometry = new THREE.BoxGeometry(0.07, 0.34, 0.07);
+const picketCapGeometry = new THREE.ConeGeometry(0.06, 0.07, 4);
+const WATTLE_STEP = 0.24;
+const wattleStakeGeometry = new THREE.CylinderGeometry(0.03, 0.035, 0.4, 6);
+const wattleStakeMaterial = flatMaterial(0x6e4a2a);
+// Two browns, so the weave reads as separate rods going over and under.
+const wattleRodMaterials = [flatMaterial(0xa87a46), flatMaterial(0x8a6236)];
+
+// `place(mesh, side, t, y, lift)` puts a mesh at t along the side; `lift` moves it
+// out from (+) or in toward (-) the side's line.
+function buildFence(bed, kind, gaps) {
   const centre = BED_CENTRES[bed];
   const group = new THREE.Group();
   group.position.set(centre.x, FENCE_BASE_Y, centre.z);
-  // Each side in turn: which way it runs, and where its line sits.
   const sides = {
-    back: { along: "x", across: -FENCE_HALF },
-    front: { along: "x", across: FENCE_HALF },
-    left: { along: "z", across: -FENCE_HALF },
-    right: { along: "z", across: FENCE_HALF },
+    back: { along: "x", across: -FENCE_HALF, out: -1 },
+    front: { along: "x", across: FENCE_HALF, out: 1 },
+    left: { along: "z", across: -FENCE_HALF, out: -1 },
+    right: { along: "z", across: FENCE_HALF, out: 1 },
   };
-  const place = (mesh, side, t, y) => {
-    const { along, across } = sides[side];
-    mesh.position.set(along === "x" ? t : across, y, along === "x" ? across : t);
+  const place = (mesh, side, t, y, lift = 0) => {
+    const { along, across, out } = sides[side];
+    const offset = across + out * lift;
+    mesh.position.set(along === "x" ? t : offset, y, along === "x" ? offset : t);
     group.add(mesh);
   };
+  const box = (side, length, height, thickness) => new THREE.BoxGeometry(...(sides[side].along === "x" ? [length, height, thickness] : [thickness, height, length]));
+
   for (const side of Object.keys(sides)) {
     const segments = gaps.has(side)
       ? [[-FENCE_HALF, -FENCE_GAP_HALF], [FENCE_GAP_HALF, FENCE_HALF]]
       : [[-FENCE_HALF, FENCE_HALF]];
     for (const [from, to] of segments) {
-      for (let t = from; t <= to + 0.001; t += FENCE_POST_STEP) {
-        place(new THREE.Mesh(fencePostGeometry, fenceMaterial), side, t, 0.17);
-        const cap = new THREE.Mesh(fenceCapGeometry, fenceMaterial);
-        cap.rotation.y = Math.PI / 4;
-        place(cap, side, t, 0.375);
-      }
-      for (const y of [0.1, 0.25]) {
-        const length = to - from;
-        const rail = new THREE.Mesh(new THREE.BoxGeometry(...(sides[side].along === "x" ? [length, 0.035, 0.03] : [0.03, 0.035, length])), fenceMaterial);
-        place(rail, side, (from + to) / 2, y);
+      if (kind === "picket") {
+        for (let t = from; t <= to + 0.001; t += 0.3) {
+          place(new THREE.Mesh(picketPostGeometry, picketMaterial), side, t, 0.17);
+          const cap = new THREE.Mesh(picketCapGeometry, picketMaterial);
+          cap.rotation.y = Math.PI / 4;
+          place(cap, side, t, 0.375);
+        }
+        for (const y of [0.1, 0.25]) place(new THREE.Mesh(box(side, to - from, 0.035, 0.03), picketMaterial), side, (from + to) / 2, y);
+      } else {
+        // Wattle: upright stakes, with rods woven over and under them in rows,
+        // each row going the other way round from the one below.
+        const count = Math.max(2, Math.round((to - from) / WATTLE_STEP));
+        const step = (to - from) / count;
+        for (let i = 0; i <= count; i++) place(new THREE.Mesh(wattleStakeGeometry, wattleStakeMaterial), side, from + i * step, 0.2);
+        for (let row = 0; row < 3; row++) {
+          for (let i = 0; i < count; i++) {
+            const rod = new THREE.Mesh(box(side, step * 1.05, 0.075, 0.05), wattleRodMaterials[(i + row) % 2]);
+            place(rod, side, from + (i + 0.5) * step, 0.08 + row * 0.1, (i + row) % 2 === 0 ? 0.035 : -0.035);
+          }
+        }
       }
     }
   }
@@ -781,15 +883,16 @@ for (const walkway of WALKWAYS) {
   walkway.length = Math.hypot(walkway.to.x - walkway.from.x, walkway.to.z - walkway.from.z);
 }
 
-// The sides of the fenced bed that a walkway leaves from, so the fence leaves a gap there.
-const fenceGaps = new Set();
-for (const walkway of WALKWAYS) {
-  for (const [bed, along] of [[walkway.a, walkway.aAlong], [walkway.b, walkway.bAlong]]) {
-    if (bed !== FENCE_BED) continue;
-    fenceGaps.add(Object.keys(SIDE_MIDDLE).find((side) => SIDE_MIDDLE[side] === along));
+// Each fenced bed's fence leaves a gap on the sides a walkway leaves from.
+for (const [bed, kind] of Object.entries(FENCES)) {
+  const gaps = new Set();
+  for (const walkway of WALKWAYS) {
+    for (const [end, along] of [[walkway.a, walkway.aAlong], [walkway.b, walkway.bAlong]]) {
+      if (end === Number(bed)) gaps.add(Object.keys(SIDE_MIDDLE).find((side) => SIDE_MIDDLE[side] === along));
+    }
   }
+  buildFence(Number(bed), kind, gaps);
 }
-buildFence(FENCE_BED, fenceGaps);
 
 
 // Earth showing in the gaps between the stones, so they read as set in the ground

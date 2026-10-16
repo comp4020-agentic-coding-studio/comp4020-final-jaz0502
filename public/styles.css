@@ -154,6 +154,14 @@ body {
   background: #f5c518;
 }
 
+.chip-tomato {
+  background: #e0392b;
+}
+
+.chip-lettuce {
+  background: #8fd14f;
+}
+
 .chip-vegetable {
   background: #e8873a;
 }

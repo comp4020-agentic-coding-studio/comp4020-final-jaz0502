@@ -24,7 +24,9 @@ export function renderPage(): string {
         <button type="button" role="radio" aria-checked="false" data-type="flower"><span class="chip chip-flower"></span>Tulip</button>
         <button type="button" role="radio" aria-checked="false" data-type="sunflower"><span class="chip chip-sunflower"></span>Sunflower</button>
         <button type="button" role="radio" aria-checked="false" data-type="shrub"><span class="chip chip-shrub"></span>Flower shrub</button>
-        <button type="button" role="radio" aria-checked="false" data-type="vegetable"><span class="chip chip-vegetable"></span>Vegetable</button>
+        <button type="button" role="radio" aria-checked="false" data-type="vegetable"><span class="chip chip-vegetable"></span>Carrot</button>
+        <button type="button" role="radio" aria-checked="false" data-type="tomato"><span class="chip chip-tomato"></span>Tomato</button>
+        <button type="button" role="radio" aria-checked="false" data-type="lettuce"><span class="chip chip-lettuce"></span>Lettuce</button>
       </div>
       <div id="who-is-here">
         <p class="panel-label">Who's here</p>

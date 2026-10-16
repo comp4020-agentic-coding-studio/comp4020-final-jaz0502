@@ -1,4 +1,4 @@
-export type PlantType = "tree" | "flower" | "sunflower" | "shrub" | "vegetable";
+export type PlantType = "tree" | "flower" | "sunflower" | "shrub" | "vegetable" | "tomato" | "lettuce";
 
 // Derived from timestamps, never stored (only empty/planted are). `growing`
 // and `mature` are generic so each plant type can draw its own: a tree grows
