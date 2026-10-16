@@ -69,12 +69,13 @@ describe("planting", () => {
 });
 
 describe("plant types", () => {
-  it("plants a tree, a flower or a flower shrub as asked, and a tree if not told", async () => {
+  it("plants a tree, a flower, a flower shrub or a vegetable as asked, and a tree if not told", async () => {
     const alice = newVisitor(app.url);
     expect((await alice.post(12, "plant", { type: "flower" })).body.plantType).toBe("flower");
     expect((await alice.post(13, "plant", { type: "shrub" })).body.plantType).toBe("shrub");
     expect((await alice.post(14, "plant", { type: "tree" })).body.plantType).toBe("tree");
     expect((await alice.post(15, "plant")).body.plantType).toBe("tree");
+    expect((await alice.post(17, "plant", { type: "vegetable" })).body.plantType).toBe("vegetable");
 
     // Everyone else sees the same types.
     expect((await plotAt(12)).plantType).toBe("flower");
@@ -160,4 +161,32 @@ describe("composting", () => {
       expect(replanted.body.plantType).toBe("flower");
     },
   );
+});
+
+describe("a vegetable", () => {
+  it("grows through the same stages as the other plants, at its own pace", { timeout: 20_000 }, async () => {
+    const stagesApp = await startApp({
+      SEED_TO_SPROUT_MS: "300",
+      SPROUT_TO_GROWING_MS: "300",
+      GROWING_TO_MATURE_MS: "300",
+      WILT_WINDOW_MS: "1000000",
+    });
+    try {
+      const alice = newVisitor(stagesApp.url);
+      await alice.post(20, "plant", { type: "vegetable" });
+      await alice.post(21, "plant", { type: "tree" });
+
+      const stateAt = async (position: number) => (await readPlots(stagesApp.url)).find((p) => p.position === position)!.state;
+      expect(await stateAt(20)).toBe("planted");
+
+      // Quicker than a tree (0.6 of its time), but it does get there: sprout, growing, mature.
+      await sleep(500);
+      expect(["sprout", "growing"]).toContain(await stateAt(20));
+      await sleep(900);
+      expect(await stateAt(20)).toBe("mature");
+      expect(await stateAt(21)).not.toBe("planted");
+    } finally {
+      await stagesApp.stop();
+    }
+  });
 });

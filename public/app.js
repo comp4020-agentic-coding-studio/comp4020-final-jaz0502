@@ -26,15 +26,16 @@ const WATER_DURATION_MS = 900;
 // The last quarter of a plot's wilt window counts as "thirsty".
 const THIRSTY_FRACTION = 0.25;
 
-const PLANT_TYPES = ["tree", "flower", "shrub"];
+const PLANT_TYPES = ["tree", "flower", "shrub", "vegetable"];
 
-const PLANT_NAME = { tree: "Fruit tree", flower: "Flower", shrub: "Flower shrub" };
+const PLANT_NAME = { tree: "Fruit tree", flower: "Flower", shrub: "Flower shrub", vegetable: "Vegetable" };
 
 // The same four growth stages mean different things for each plant.
 const STAGE_LABEL = {
   tree: { planted: "just planted", sprout: "sprouting", growing: "growing", mature: "fruiting" },
   flower: { planted: "just planted", sprout: "sprouting", growing: "budding", mature: "in bloom" },
   shrub: { planted: "just planted", sprout: "sprouting", growing: "growing", mature: "in flower" },
+  vegetable: { planted: "just planted", sprout: "sprouting", growing: "growing", mature: "ready to pick" },
 };
 
 const PALETTE = {
@@ -44,6 +45,7 @@ const PALETTE = {
   seedTree: 0x3f7d32,
   seedFlower: 0xb5835a,
   seedShrub: 0x5f8f4a,
+  seedVegetable: 0xc9a36b,
   stemSprout: 0x6a9b46,
   foliageSprout: 0x8fc45f,
   trunk: 0x6b4423,
@@ -58,6 +60,9 @@ const PALETTE = {
   shrubLeafLight: 0x6bb36e,
   shrubBloomPink: 0xf58fb9,
   shrubBloomWhite: 0xfff3fa,
+  vegTop: 0x4f9e3a,
+  vegTopLight: 0x78bf4a,
+  carrot: 0xe8873a,
   wiltedWood: 0x8a6b4f,
   wiltedFoliage: 0xab8f66,
 };
@@ -150,7 +155,14 @@ function part(geometry, colour, x = 0, y = 0, z = 0) {
 
 function buildSeeds(type) {
   const group = new THREE.Group();
-  const colour = type === "flower" ? PALETTE.seedFlower : type === "shrub" ? PALETTE.seedShrub : PALETTE.seedTree;
+  const colour =
+    type === "flower"
+      ? PALETTE.seedFlower
+      : type === "shrub"
+        ? PALETTE.seedShrub
+        : type === "vegetable"
+          ? PALETTE.seedVegetable
+          : PALETTE.seedTree;
   for (let i = 0; i < 3; i++) {
     group.add(part(new THREE.SphereGeometry(0.07, 6, 4), colour, (i - 1) * 0.08, 0.05, (i % 2) * 0.05));
   }
@@ -169,6 +181,13 @@ function buildSprout(type) {
   } else if (type === "shrub") {
     group.add(part(new THREE.SphereGeometry(0.1, 6, 5), PALETTE.shrubLeaf, -0.05, 0.08, 0));
     group.add(part(new THREE.SphereGeometry(0.08, 6, 5), PALETTE.shrubLeafLight, 0.07, 0.07, 0.03));
+  } else if (type === "vegetable") {
+    // Two small feathery tufts just up out of the soil.
+    for (const side of [-1, 1]) {
+      const tuft = part(new THREE.ConeGeometry(0.035, 0.16, 4), PALETTE.vegTopLight, side * 0.05, 0.09, 0);
+      tuft.rotation.z = -side * 0.35;
+      group.add(tuft);
+    }
   } else {
     group.add(part(new THREE.CylinderGeometry(0.02, 0.02, 0.25, 6), PALETTE.stemSprout, 0, 0.12, 0));
     group.add(part(new THREE.ConeGeometry(0.1, 0.2, 6), PALETTE.foliageSprout, 0, 0.3, 0));
@@ -232,6 +251,33 @@ function buildShrub(mature) {
   return group;
 }
 
+// A carrot: a fan of feathery green leaves and, once it is ready to pick, the
+// orange top of the root showing above the soil.
+function buildVegetable(mature) {
+  const group = new THREE.Group();
+  const leaves = mature ? 7 : 5;
+  const height = mature ? 0.34 : 0.24;
+  for (let i = 0; i < leaves; i++) {
+    const angle = (i / leaves) * Math.PI * 2;
+    const leaf = part(
+      new THREE.ConeGeometry(0.035, height, 4),
+      i % 2 === 0 ? PALETTE.vegTop : PALETTE.vegTopLight,
+      Math.cos(angle) * 0.05,
+      height / 2 + 0.02,
+      Math.sin(angle) * 0.05,
+    );
+    leaf.rotation.z = -Math.cos(angle) * 0.45;
+    leaf.rotation.x = Math.sin(angle) * 0.45;
+    group.add(leaf);
+  }
+  if (mature) {
+    const root = part(new THREE.ConeGeometry(0.075, 0.16, 6), PALETTE.carrot, 0, 0.02, 0);
+    root.rotation.x = Math.PI;
+    group.add(root);
+  }
+  return group;
+}
+
 // wilted: a collapsed, drooping, brown version of whichever plant it was.
 function buildWilted(type) {
   const group = new THREE.Group();
@@ -244,6 +290,14 @@ function buildWilted(type) {
     bush.scale.y = 0.5;
     group.add(bush);
     group.scale.setScalar(0.85);
+  } else if (type === "vegetable") {
+    // The leaves flop over, brown.
+    for (let i = 0; i < 4; i++) {
+      const leaf = part(new THREE.ConeGeometry(0.035, 0.22, 4), PALETTE.wiltedFoliage, Math.cos(i * 1.6) * 0.05, 0.06, Math.sin(i * 1.6) * 0.05);
+      leaf.rotation.z = Math.PI / 2 - 0.2;
+      leaf.rotation.y = i * 1.6;
+      group.add(leaf);
+    }
   } else {
     group.add(part(new THREE.CylinderGeometry(0.06, 0.08, 0.35, 7), PALETTE.wiltedWood, 0, 0.17, 0));
     const foliage = part(new THREE.ConeGeometry(0.28, 0.5, 7), PALETTE.wiltedFoliage, 0, 0.45, 0);
@@ -264,6 +318,7 @@ function buildPlant(type, state) {
   const mature = state === "mature";
   if (type === "flower") return buildFlower(mature);
   if (type === "shrub") return buildShrub(mature);
+  if (type === "vegetable") return buildVegetable(mature);
   return buildTree(mature);
 }
 

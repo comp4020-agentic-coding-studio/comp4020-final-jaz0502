@@ -132,6 +132,7 @@ describe("what the page is told", () => {
         beds: { name: string; takes: string[] | null }[];
       };
       expect(hello.beds).toHaveLength(4);
+      expect(hello.beds[0]).toEqual({ name: "The Cottage Garden", takes: null });
       expect(hello.beds[1]).toEqual({ name: "The Flower Garden", takes: ["flower", "shrub"] });
       expect(hello.beds[2]).toEqual({ name: "The Fruit Garden", takes: ["tree"] });
       expect(hello.beds.filter((b) => b.takes === null)).toHaveLength(2);

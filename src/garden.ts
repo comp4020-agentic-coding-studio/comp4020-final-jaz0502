@@ -5,7 +5,7 @@ import type { PlantType, Plot, PlotState } from "./types.ts";
 // plots keep their numbers.
 export const GRID_SIZE = 100;
 
-export const PLANT_TYPES = ["tree", "flower", "shrub"] as const;
+export const PLANT_TYPES = ["tree", "flower", "shrub", "vegetable"] as const;
 
 // What each bed is called and what it takes, in the order of the plots. A bed with
 // `takes: null` takes any plant. This is the one place that says so: the server
@@ -19,7 +19,7 @@ export interface Bed {
 }
 
 export const BEDS: readonly Bed[] = [
-  { name: "Bed 1", takes: null, takesText: "any plant" },
+  { name: "The Cottage Garden", takes: null, takesText: "any plant" },
   { name: "The Flower Garden", takes: ["flower", "shrub"], takesText: "flowers and flower shrubs" },
   { name: "The Fruit Garden", takes: ["tree"], takesText: "fruit trees" },
   { name: "Bed 4", takes: null, takesText: "any plant" },
@@ -60,7 +60,7 @@ export const DAY_LENGTH_MS = Number(process.env.DAY_LENGTH_MS ?? 30 * 60_000);
 
 // How fast each type moves through its stages, as a multiple of the tree's
 // durations: a flower blooms in about half the time a tree takes to fruit.
-const GROWTH_SCALE: Record<PlantType, number> = { tree: 1, flower: 0.5, shrub: 0.75 };
+const GROWTH_SCALE: Record<PlantType, number> = { tree: 1, flower: 0.5, shrub: 0.75, vegetable: 0.6 };
 
 export function emptyPlot(position: number): Plot {
   return {

@@ -23,6 +23,7 @@ export function renderPage(): string {
         <button type="button" role="radio" aria-checked="true" data-type="tree"><span class="chip chip-tree"></span>Fruit tree</button>
         <button type="button" role="radio" aria-checked="false" data-type="flower"><span class="chip chip-flower"></span>Flower</button>
         <button type="button" role="radio" aria-checked="false" data-type="shrub"><span class="chip chip-shrub"></span>Flower shrub</button>
+        <button type="button" role="radio" aria-checked="false" data-type="vegetable"><span class="chip chip-vegetable"></span>Vegetable</button>
       </div>
       <div id="who-is-here">
         <p class="panel-label">Who's here</p>
