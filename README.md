@@ -31,6 +31,7 @@ Some of "good" is checked by automated tests in `spec/`:
 - A visitor's cookie is never sent to anyone else. Other people only ever see a one-way public id, and the colours come from that id.
 - Everyone who joins is told who is already here, a gardener's move reaches the others within a second, and two tabs from one browser are one gardener. Moves are checked and limited, so invalid ones, ones from someone not connected, and ones sent too fast are refused.
 - A gardener's record counts only what succeeds, goes only to that gardener, and survives a restart.
+- Each gardener can only act on plots so often: a limited number of plants, waterings and compostings in a short time. Past it the server turns the action away and nothing changes, and it counts the same for everyone, so one person's flood never stops another.
 - The Recent list shows what others did, holds only the last few entries, and never includes a refused action.
 - The server's log names who did what, including refused actions, and never contains a cookie.
 
