@@ -20,13 +20,15 @@ export function renderPage(): string {
       <p id="bed-here" class="bed-here"></p>
       <div id="plant-picker" role="radiogroup" aria-label="Choose what to plant">
         <p class="panel-label">What to plant</p>
-        <button type="button" role="radio" aria-checked="true" data-type="tree"><span class="chip chip-tree"></span>Fruit tree</button>
+        <button type="button" role="radio" aria-checked="true" data-type="tree"><span class="chip chip-tree"></span>Apple tree</button>
         <button type="button" role="radio" aria-checked="false" data-type="flower"><span class="chip chip-flower"></span>Tulip</button>
         <button type="button" role="radio" aria-checked="false" data-type="sunflower"><span class="chip chip-sunflower"></span>Sunflower</button>
         <button type="button" role="radio" aria-checked="false" data-type="shrub"><span class="chip chip-shrub"></span>Flower shrub</button>
         <button type="button" role="radio" aria-checked="false" data-type="vegetable"><span class="chip chip-vegetable"></span>Carrot</button>
         <button type="button" role="radio" aria-checked="false" data-type="tomato"><span class="chip chip-tomato"></span>Tomato</button>
         <button type="button" role="radio" aria-checked="false" data-type="lettuce"><span class="chip chip-lettuce"></span>Lettuce</button>
+        <button type="button" role="radio" aria-checked="false" data-type="strawberry"><span class="chip chip-strawberry"></span>Strawberry</button>
+        <button type="button" role="radio" aria-checked="false" data-type="blueberry"><span class="chip chip-blueberry"></span>Blueberry</button>
       </div>
       <div id="who-is-here">
         <p class="panel-label">Who's here</p>

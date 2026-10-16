@@ -26,9 +26,9 @@ const WATER_DURATION_MS = 900;
 // The last quarter of a plot's wilt window counts as "thirsty".
 const THIRSTY_FRACTION = 0.25;
 
-const PLANT_TYPES = ["tree", "flower", "sunflower", "shrub", "vegetable", "tomato", "lettuce"];
+const PLANT_TYPES = ["tree", "flower", "sunflower", "shrub", "vegetable", "tomato", "lettuce", "strawberry", "blueberry"];
 
-const PLANT_NAME = { tree: "Fruit tree", flower: "Tulip", sunflower: "Sunflower", shrub: "Flower shrub", vegetable: "Carrot", tomato: "Tomato", lettuce: "Lettuce" };
+const PLANT_NAME = { tree: "Apple tree", flower: "Tulip", sunflower: "Sunflower", shrub: "Flower shrub", vegetable: "Carrot", tomato: "Tomato", lettuce: "Lettuce", strawberry: "Strawberry", blueberry: "Blueberry" };
 
 // The same four growth stages mean different things for each plant.
 const STAGE_LABEL = {
@@ -39,6 +39,8 @@ const STAGE_LABEL = {
   vegetable: { planted: "just planted", sprout: "sprouting", growing: "growing", mature: "ready to pick" }, // the carrot
   tomato: { planted: "just planted", sprout: "sprouting", growing: "growing", mature: "ripe" },
   lettuce: { planted: "just planted", sprout: "sprouting", growing: "growing", mature: "ready to pick" },
+  strawberry: { planted: "just planted", sprout: "sprouting", growing: "flowering", mature: "ripe" },
+  blueberry: { planted: "just planted", sprout: "sprouting", growing: "growing", mature: "ripe" },
 };
 
 const PALETTE = {
@@ -56,7 +58,8 @@ const PALETTE = {
   foliageSprout: 0x8fc45f,
   trunk: 0x6b4423,
   foliageTree: 0x5a9c48,
-  fruit: 0xdd6b55,
+  foliageTreeLight: 0x6fb05a,
+  fruit: 0xd42a2a,
   flowerStem: 0x5fa04b,
   flowerLeaf: 0x7cc063,
   flowerBud: 0xa8d672,
@@ -79,6 +82,14 @@ const PALETTE = {
   lettuce: 0x8fd14f,
   lettuceDeep: 0x5fae3a,
   lettuceLight: 0xb7e57a,
+  strawberryRed: 0xe5304f,
+  strawberryLeaf: 0x4a9a3e,
+  strawberryBlossom: 0xfff6f0,
+  blueberryBlue: 0x3f55c8,
+  blueberryLeaf: 0x5aa860,
+  blueberryLeafLight: 0x7cc47a,
+  blueberryTwig: 0x6e4a2a,
+  seedBerry: 0xb8a58a,
   wiltedWood: 0x8a6b4f,
   wiltedFoliage: 0xab8f66,
 };
@@ -169,22 +180,20 @@ function part(geometry, colour, x = 0, y = 0, z = 0) {
   return mesh;
 }
 
+const SEED_COLOUR = {
+  flower: PALETTE.seedFlower,
+  sunflower: PALETTE.seedSunflower,
+  shrub: PALETTE.seedShrub,
+  vegetable: PALETTE.seedVegetable,
+  tomato: PALETTE.seedTomato,
+  lettuce: PALETTE.seedLettuce,
+  strawberry: PALETTE.seedBerry,
+  blueberry: PALETTE.seedBerry,
+};
+
 function buildSeeds(type) {
   const group = new THREE.Group();
-  const colour =
-    type === "flower"
-      ? PALETTE.seedFlower
-      : type === "sunflower"
-        ? PALETTE.seedSunflower
-        : type === "shrub"
-        ? PALETTE.seedShrub
-        : type === "tomato"
-          ? PALETTE.seedTomato
-          : type === "lettuce"
-            ? PALETTE.seedLettuce
-            : type === "vegetable"
-          ? PALETTE.seedVegetable
-          : PALETTE.seedTree;
+  const colour = SEED_COLOUR[type] ?? PALETTE.seedTree;
   for (let i = 0; i < 3; i++) {
     group.add(part(new THREE.SphereGeometry(0.07, 6, 4), colour, (i - 1) * 0.08, 0.05, (i % 2) * 0.05));
   }
@@ -218,6 +227,22 @@ function buildSprout(type) {
       leaf.scale.set(1, 0.4, 0.8);
       group.add(leaf);
     }
+  } else if (type === "strawberry") {
+    // Three small toothed leaves low on the soil.
+    for (let i = 0; i < 3; i++) {
+      const angle = (i / 3) * Math.PI * 2;
+      const leaf = part(new THREE.SphereGeometry(0.055, 6, 4), PALETTE.strawberryLeaf, Math.cos(angle) * 0.05, 0.05, Math.sin(angle) * 0.05);
+      leaf.scale.set(1, 0.35, 0.9);
+      group.add(leaf);
+    }
+  } else if (type === "blueberry") {
+    // A woody twig with two tiny leaves.
+    group.add(part(new THREE.CylinderGeometry(0.014, 0.02, 0.2, 5), PALETTE.blueberryTwig, 0, 0.1, 0));
+    for (const side of [-1, 1]) {
+      const leaf = part(new THREE.SphereGeometry(0.045, 6, 4), PALETTE.blueberryLeaf, side * 0.05, 0.19, 0);
+      leaf.scale.set(1, 0.45, 0.8);
+      group.add(leaf);
+    }
   } else if (type === "lettuce") {
     for (const side of [-1, 1]) {
       const leaf = part(new THREE.SphereGeometry(0.07, 6, 4), PALETTE.lettuceLight, side * 0.05, 0.05, 0);
@@ -233,22 +258,30 @@ function buildSprout(type) {
     }
   } else {
     group.add(part(new THREE.CylinderGeometry(0.02, 0.02, 0.25, 6), PALETTE.stemSprout, 0, 0.12, 0));
-    group.add(part(new THREE.ConeGeometry(0.1, 0.2, 6), PALETTE.foliageSprout, 0, 0.3, 0));
+    group.add(part(new THREE.SphereGeometry(0.12, 7, 5), PALETTE.foliageSprout, 0, 0.3, 0));
   }
   return group;
 }
 
+// An apple tree: a short trunk under a round crown of overlapping leaf balls. Once
+// it is fruiting, red apples sit all over the outside of the crown.
+const CROWN = [
+  [0, 0.6, 0, 0.27],
+  [0.17, 0.52, 0.06, 0.2],
+  [-0.16, 0.53, -0.05, 0.2],
+  [0.03, 0.5, -0.17, 0.19],
+  [-0.03, 0.51, 0.17, 0.19],
+  [0.02, 0.76, 0.02, 0.17],
+];
 function buildTree(mature) {
   const group = new THREE.Group();
-  group.add(part(new THREE.CylinderGeometry(0.06, 0.08, 0.35, 7), PALETTE.trunk, 0, 0.17, 0));
-  group.add(part(new THREE.ConeGeometry(0.28, 0.5, 7), PALETTE.foliageTree, 0, 0.55, 0));
+  group.add(part(new THREE.CylinderGeometry(0.055, 0.08, 0.38, 7), PALETTE.trunk, 0, 0.19, 0));
+  CROWN.forEach(([x, y, z, r], i) => {
+    group.add(part(new THREE.SphereGeometry(r, 8, 6), i % 2 === 0 ? PALETTE.foliageTree : PALETTE.foliageTreeLight, x, y, z));
+  });
   if (mature) {
-    for (let i = 0; i < 3; i++) {
-      const angle = (i / 3) * Math.PI * 2;
-      group.add(
-        part(new THREE.SphereGeometry(0.05, 6, 4), PALETTE.fruit, Math.cos(angle) * 0.2, 0.45, Math.sin(angle) * 0.2),
-      );
-    }
+    const apples = [[0.24, 0.5, 0.1], [-0.22, 0.58, 0.12], [0.05, 0.46, 0.27], [-0.1, 0.44, -0.24], [0.2, 0.62, -0.17], [-0.05, 0.74, 0.18], [0.13, 0.4, -0.2]];
+    for (const [x, y, z] of apples) group.add(part(new THREE.SphereGeometry(0.06, 7, 5), PALETTE.fruit, x, y, z));
   }
   return group;
 }
@@ -411,6 +444,53 @@ function buildLettuce(mature) {
   return group;
 }
 
+// A strawberry: a low spread of toothed leaves. White blossoms show while it grows
+// and red berries sit on the leaves once it is ripe.
+function buildStrawberry(mature) {
+  const group = new THREE.Group();
+  const leaves = mature ? 7 : 5;
+  for (let i = 0; i < leaves; i++) {
+    const angle = (i / leaves) * Math.PI * 2;
+    const leaf = part(new THREE.SphereGeometry(0.09, 6, 4), PALETTE.strawberryLeaf, Math.cos(angle) * 0.11, 0.08, Math.sin(angle) * 0.11);
+    leaf.scale.set(1, 0.4, 0.85);
+    leaf.rotation.y = -angle;
+    group.add(leaf);
+  }
+  group.add(part(new THREE.SphereGeometry(0.1, 7, 4), PALETTE.strawberryLeaf, 0, 0.1, 0));
+  const spots = [[0.12, 0.17, 0.05], [-0.1, 0.16, 0.1], [0.02, 0.17, -0.13], [-0.06, 0.15, -0.06]];
+  if (mature) {
+    for (const [x, y, z] of spots) {
+      const berry = part(new THREE.SphereGeometry(0.048, 7, 5), PALETTE.strawberryRed, x, y, z);
+      berry.scale.y = 1.2;
+      group.add(berry);
+    }
+  } else {
+    for (const [x, y, z] of spots.slice(0, 3)) group.add(part(new THREE.SphereGeometry(0.03, 6, 4), PALETTE.strawberryBlossom, x, y + 0.02, z));
+  }
+  return group;
+}
+
+// A blueberry: a small rounded bush of woody twigs and dark leaves, with clusters
+// of blue berries on it once it is ripe.
+function buildBlueberry(mature) {
+  const group = new THREE.Group();
+  const size = mature ? 1 : 0.8;
+  group.add(part(new THREE.CylinderGeometry(0.02, 0.03, 0.2, 5), PALETTE.blueberryTwig, 0, 0.1, 0));
+  [[0, 0.3, 0, 0.2], [0.13, 0.24, 0.05, 0.14], [-0.12, 0.25, -0.04, 0.14], [0.02, 0.22, 0.14, 0.12]].forEach(([x, y, z, r], i) => {
+    group.add(part(new THREE.SphereGeometry(r * size, 7, 5), i % 2 === 0 ? PALETTE.blueberryLeaf : PALETTE.blueberryLeafLight, x * size, y * size + 0.04, z * size));
+  });
+  if (mature) {
+    // Berries sit on the outside of the bush so they show from above and the side.
+    for (let i = 0; i < 16; i++) {
+      const angle = i * 2.4;
+      const radius = 0.15 + (i % 3) * 0.04;
+      const y = 0.22 + (i % 5) * 0.05;
+      group.add(part(new THREE.SphereGeometry(0.052, 7, 5), PALETTE.blueberryBlue, Math.cos(angle) * radius, y, Math.sin(angle) * radius));
+    }
+  }
+  return group;
+}
+
 // wilted: a collapsed, drooping, brown version of whichever plant it was.
 function buildWilted(type) {
   const group = new THREE.Group();
@@ -434,6 +514,18 @@ function buildWilted(type) {
     group.add(part(new THREE.CylinderGeometry(0.02, 0.026, 0.3, 6), PALETTE.wiltedWood, 0, 0.15, 0));
     group.add(part(new THREE.SphereGeometry(0.045, 6, 4), PALETTE.wiltedFoliage, -0.1, 0.1, 0.03));
     group.rotation.z = 0.35;
+  } else if (type === "strawberry") {
+    for (let i = 0; i < 5; i++) {
+      const leaf = part(new THREE.SphereGeometry(0.08, 6, 4), PALETTE.wiltedFoliage, Math.cos(i * 1.3) * 0.1, 0.03, Math.sin(i * 1.3) * 0.1);
+      leaf.scale.set(1, 0.25, 0.9);
+      group.add(leaf);
+    }
+  } else if (type === "blueberry") {
+    group.add(part(new THREE.CylinderGeometry(0.02, 0.03, 0.22, 5), PALETTE.wiltedWood, 0, 0.11, 0));
+    const bush = part(new THREE.SphereGeometry(0.17, 7, 5), PALETTE.wiltedFoliage, 0, 0.14, 0);
+    bush.scale.y = 0.5;
+    group.add(bush);
+    group.rotation.z = 0.25;
   } else if (type === "lettuce") {
     for (let i = 0; i < 5; i++) {
       const leaf = part(new THREE.SphereGeometry(0.1, 7, 4), PALETTE.wiltedFoliage, Math.cos(i * 1.3) * 0.1, 0.03, Math.sin(i * 1.3) * 0.1);
@@ -450,8 +542,8 @@ function buildWilted(type) {
     }
   } else {
     group.add(part(new THREE.CylinderGeometry(0.06, 0.08, 0.35, 7), PALETTE.wiltedWood, 0, 0.17, 0));
-    const foliage = part(new THREE.ConeGeometry(0.28, 0.5, 7), PALETTE.wiltedFoliage, 0, 0.45, 0);
-    foliage.scale.y = 0.5;
+    const foliage = part(new THREE.SphereGeometry(0.3, 8, 6), PALETTE.wiltedFoliage, 0, 0.42, 0);
+    foliage.scale.y = 0.55;
     group.add(foliage);
     group.scale.setScalar(0.7);
     group.rotation.z = 0.4;
@@ -472,6 +564,8 @@ function buildPlant(type, state) {
   if (type === "vegetable") return buildVegetable(mature);
   if (type === "tomato") return buildTomato(mature);
   if (type === "lettuce") return buildLettuce(mature);
+  if (type === "strawberry") return buildStrawberry(mature);
+  if (type === "blueberry") return buildBlueberry(mature);
   return buildTree(mature);
 }
 
@@ -758,7 +852,7 @@ const FENCE_BASE_Y = -0.15;
 const FENCE_GAP_HALF = 0.85;
 
 // Which bed has which fence, and the sides of each that a walkway leaves from.
-const FENCES = { 1: "picket", 3: "wattle" };
+const FENCES = { 1: "picket", 2: "log", 3: "wattle" };
 
 // Pure white, with a little glow of its own so the shaded sides do not read grey.
 const picketMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.14, flatShading: true });
@@ -769,6 +863,12 @@ const wattleStakeGeometry = new THREE.CylinderGeometry(0.03, 0.035, 0.4, 6);
 const wattleStakeMaterial = flatMaterial(0x6e4a2a);
 // Two browns, so the weave reads as separate rods going over and under.
 const wattleRodMaterials = [flatMaterial(0xa87a46), flatMaterial(0x8a6236)];
+
+// Log rail: round log posts with a rounded top, joined by two rough rails that run
+// from post to post, each a little thicker or paler than the last.
+const LOG_STEP = 0.66;
+const logPostGeometry = new THREE.CylinderGeometry(0.06, 0.07, 0.36, 7);
+const logMaterials = [flatMaterial(0x7a5230), flatMaterial(0x6a4626), flatMaterial(0x8a6038)];
 
 // `place(mesh, side, t, y, lift)` puts a mesh at t along the side; `lift` moves it
 // out from (+) or in toward (-) the side's line.
@@ -803,6 +903,22 @@ function buildFence(bed, kind, gaps) {
           place(cap, side, t, 0.375);
         }
         for (const y of [0.1, 0.25]) place(new THREE.Mesh(box(side, to - from, 0.035, 0.03), picketMaterial), side, (from + to) / 2, y);
+      } else if (kind === "log") {
+        const count = Math.max(1, Math.round((to - from) / LOG_STEP));
+        const step = (to - from) / count;
+        for (let i = 0; i <= count; i++) {
+          const post = new THREE.Mesh(logPostGeometry, logMaterials[i % 3]);
+          place(post, side, from + i * step, 0.18);
+          const top = new THREE.Mesh(new THREE.SphereGeometry(0.066, 7, 4), logMaterials[i % 3]);
+          top.scale.y = 0.5;
+          place(top, side, from + i * step, 0.37);
+        }
+        [[0.11, 0.045], [0.26, 0.04]].forEach(([y, thickness], row) => {
+          for (let i = 0; i < count; i++) {
+            const rail = new THREE.Mesh(box(side, step, thickness * 1.7, thickness * 1.7), logMaterials[(i + row) % 3]);
+            place(rail, side, from + (i + 0.5) * step, y + ((i + row) % 2) * 0.012, 0.04);
+          }
+        });
       } else {
         // Wattle: upright stakes, with rods woven over and under them in rows,
         // each row going the other way round from the one below.

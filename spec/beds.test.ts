@@ -64,17 +64,21 @@ describe("The Flower Garden", () => {
 });
 
 describe("The Fruit Garden", () => {
-  it("takes a fruit tree, which is the tree, and nothing else", async () => {
+  it("takes an apple tree, a strawberry and a blueberry, and nothing else", async () => {
     const alice = newVisitor(app.url);
     expect((await alice.post(51, "plant", { type: "tree" })).status).toBe(200);
-    // The default plant is a tree, so leaving the type out is a fruit tree.
+    // The default plant is a tree, so leaving the type out is an apple tree.
     expect((await alice.post(52, "plant")).status).toBe(200);
     expect(await plotAt(52)).toMatchObject({ plantType: "tree" });
+    expect((await alice.post(53, "plant", { type: "strawberry" })).status).toBe(200);
+    expect((await alice.post(54, "plant", { type: "blueberry" })).status).toBe(200);
+    expect(await plotAt(53)).toMatchObject({ plantType: "strawberry" });
+    expect(await plotAt(54)).toMatchObject({ plantType: "blueberry" });
 
-    for (const type of ["flower", "sunflower", "shrub"]) {
+    for (const type of ["flower", "sunflower", "shrub", "vegetable", "tomato", "lettuce"]) {
       const refused = await alice.post(55, "plant", { type });
       expect(refused.status).toBe(409);
-      expect((refused.body as unknown as { error: string }).error).toMatch(/Fruit Garden only takes fruit trees/);
+      expect((refused.body as unknown as { error: string }).error).toMatch(/Fruit Garden only takes apple trees, strawberries and blueberries/);
     }
     expect((await plotAt(55)).state).toBe("empty");
   });
@@ -106,7 +110,7 @@ describe("The Vegetable Garden", () => {
     expect(await plotAt(76)).toMatchObject({ plantType: "tomato" });
     expect(await plotAt(77)).toMatchObject({ plantType: "lettuce" });
 
-    for (const type of ["tree", "flower", "sunflower", "shrub"]) {
+    for (const type of ["tree", "flower", "sunflower", "shrub", "strawberry", "blueberry"]) {
       const refused = await alice.post(80, "plant", { type });
       expect(refused.status).toBe(409);
       expect((refused.body as unknown as { error: string }).error).toMatch(/Vegetable Garden only takes carrots, tomatoes and lettuces/);
@@ -125,7 +129,7 @@ describe("The Vegetable Garden", () => {
 });
 
 describe("The Cottage Garden, the bed that takes anything", () => {
-  it("takes every plant: a fruit tree, a flower, a sunflower, a flower shrub, a carrot, a tomato and a lettuce", async () => {
+  it("takes every plant: an apple tree, a flower, a sunflower, a flower shrub, a carrot, a tomato, a lettuce, a strawberry and a blueberry", async () => {
     const alice = newVisitor(app.url);
     expect((await alice.post(10, "plant", { type: "tree" })).status).toBe(200);
     expect((await alice.post(11, "plant", { type: "flower" })).status).toBe(200);
@@ -134,6 +138,8 @@ describe("The Cottage Garden, the bed that takes anything", () => {
     expect((await alice.post(14, "plant", { type: "sunflower" })).status).toBe(200);
     expect((await alice.post(15, "plant", { type: "tomato" })).status).toBe(200);
     expect((await alice.post(16, "plant", { type: "lettuce" })).status).toBe(200);
+    expect((await alice.post(17, "plant", { type: "strawberry" })).status).toBe(200);
+    expect((await alice.post(18, "plant", { type: "blueberry" })).status).toBe(200);
   });
 });
 
@@ -169,7 +175,7 @@ describe("what the page is told", () => {
       expect(hello.beds).toHaveLength(4);
       expect(hello.beds[0]).toEqual({ name: "The Cottage Garden", takes: null });
       expect(hello.beds[1]).toEqual({ name: "The Flower Garden", takes: ["flower", "sunflower", "shrub"] });
-      expect(hello.beds[2]).toEqual({ name: "The Fruit Garden", takes: ["tree"] });
+      expect(hello.beds[2]).toEqual({ name: "The Fruit Garden", takes: ["tree", "strawberry", "blueberry"] });
       expect(hello.beds[3]).toEqual({ name: "The Vegetable Garden", takes: ["vegetable", "tomato", "lettuce"] });
       expect(hello.beds.filter((b) => b.takes === null)).toHaveLength(1);
     } finally {

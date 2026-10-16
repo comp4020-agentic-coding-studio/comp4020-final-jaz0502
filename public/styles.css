@@ -158,6 +158,14 @@ body {
   background: #e0392b;
 }
 
+.chip-strawberry {
+  background: #e5304f;
+}
+
+.chip-blueberry {
+  background: #4b5fc4;
+}
+
 .chip-lettuce {
   background: #8fd14f;
 }
