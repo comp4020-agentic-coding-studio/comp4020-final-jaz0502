@@ -69,13 +69,14 @@ describe("planting", () => {
 });
 
 describe("plant types", () => {
-  it("plants a tree, a flower, a flower shrub or a vegetable as asked, and a tree if not told", async () => {
+  it("plants a tree, a flower, a sunflower, a flower shrub or a vegetable as asked, and a tree if not told", async () => {
     const alice = newVisitor(app.url);
     expect((await alice.post(12, "plant", { type: "flower" })).body.plantType).toBe("flower");
     expect((await alice.post(13, "plant", { type: "shrub" })).body.plantType).toBe("shrub");
     expect((await alice.post(14, "plant", { type: "tree" })).body.plantType).toBe("tree");
     expect((await alice.post(15, "plant")).body.plantType).toBe("tree");
     expect((await alice.post(17, "plant", { type: "vegetable" })).body.plantType).toBe("vegetable");
+    expect((await alice.post(18, "plant", { type: "sunflower" })).body.plantType).toBe("sunflower");
 
     // Everyone else sees the same types.
     expect((await plotAt(12)).plantType).toBe("flower");

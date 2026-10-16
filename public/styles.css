@@ -147,7 +147,11 @@ body {
 }
 
 .chip-flower {
-  background: #f58fb9;
+  background: #e8445a;
+}
+
+.chip-sunflower {
+  background: #f5c518;
 }
 
 .chip-vegetable {

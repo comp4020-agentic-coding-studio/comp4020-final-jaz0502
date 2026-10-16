@@ -21,7 +21,8 @@ export function renderPage(): string {
       <div id="plant-picker" role="radiogroup" aria-label="Choose what to plant">
         <p class="panel-label">What to plant</p>
         <button type="button" role="radio" aria-checked="true" data-type="tree"><span class="chip chip-tree"></span>Fruit tree</button>
-        <button type="button" role="radio" aria-checked="false" data-type="flower"><span class="chip chip-flower"></span>Flower</button>
+        <button type="button" role="radio" aria-checked="false" data-type="flower"><span class="chip chip-flower"></span>Tulip</button>
+        <button type="button" role="radio" aria-checked="false" data-type="sunflower"><span class="chip chip-sunflower"></span>Sunflower</button>
         <button type="button" role="radio" aria-checked="false" data-type="shrub"><span class="chip chip-shrub"></span>Flower shrub</button>
         <button type="button" role="radio" aria-checked="false" data-type="vegetable"><span class="chip chip-vegetable"></span>Vegetable</button>
       </div>

@@ -26,14 +26,15 @@ const WATER_DURATION_MS = 900;
 // The last quarter of a plot's wilt window counts as "thirsty".
 const THIRSTY_FRACTION = 0.25;
 
-const PLANT_TYPES = ["tree", "flower", "shrub", "vegetable"];
+const PLANT_TYPES = ["tree", "flower", "sunflower", "shrub", "vegetable"];
 
-const PLANT_NAME = { tree: "Fruit tree", flower: "Flower", shrub: "Flower shrub", vegetable: "Vegetable" };
+const PLANT_NAME = { tree: "Fruit tree", flower: "Tulip", sunflower: "Sunflower", shrub: "Flower shrub", vegetable: "Vegetable" };
 
 // The same four growth stages mean different things for each plant.
 const STAGE_LABEL = {
   tree: { planted: "just planted", sprout: "sprouting", growing: "growing", mature: "fruiting" },
-  flower: { planted: "just planted", sprout: "sprouting", growing: "budding", mature: "in bloom" },
+  flower: { planted: "just planted", sprout: "sprouting", growing: "budding", mature: "in bloom" }, // the tulip
+  sunflower: { planted: "just planted", sprout: "sprouting", growing: "growing", mature: "in bloom" },
   shrub: { planted: "just planted", sprout: "sprouting", growing: "growing", mature: "in flower" },
   vegetable: { planted: "just planted", sprout: "sprouting", growing: "growing", mature: "ready to pick" },
 };
@@ -45,6 +46,7 @@ const PALETTE = {
   seedTree: 0x3f7d32,
   seedFlower: 0xb5835a,
   seedShrub: 0x5f8f4a,
+  seedSunflower: 0x4a4038,
   seedVegetable: 0xc9a36b,
   stemSprout: 0x6a9b46,
   foliageSprout: 0x8fc45f,
@@ -54,8 +56,11 @@ const PALETTE = {
   flowerStem: 0x5fa04b,
   flowerLeaf: 0x7cc063,
   flowerBud: 0xa8d672,
-  petal: 0xf58fb9,
-  petalCentre: 0xffd54a,
+  tulip: 0xe8445a,
+  tulipDeep: 0xc42f4a,
+  sunPetal: 0xffd21f,
+  sunPetalDeep: 0xf7b500,
+  sunCentre: 0x5a3a1e,
   shrubLeaf: 0x4f9e5a,
   shrubLeafLight: 0x6bb36e,
   shrubBloomPink: 0xf58fb9,
@@ -158,7 +163,9 @@ function buildSeeds(type) {
   const colour =
     type === "flower"
       ? PALETTE.seedFlower
-      : type === "shrub"
+      : type === "sunflower"
+        ? PALETTE.seedSunflower
+        : type === "shrub"
         ? PALETTE.seedShrub
         : type === "vegetable"
           ? PALETTE.seedVegetable
@@ -176,6 +183,14 @@ function buildSprout(type) {
     for (const side of [-1, 1]) {
       const leaf = part(new THREE.ConeGeometry(0.05, 0.13, 4), PALETTE.flowerLeaf, side * 0.06, 0.13, 0);
       leaf.rotation.z = -side * 1.1;
+      group.add(leaf);
+    }
+  } else if (type === "sunflower") {
+    // Two fat seed leaves on a thick little stem.
+    group.add(part(new THREE.CylinderGeometry(0.03, 0.035, 0.2, 6), PALETTE.flowerStem, 0, 0.1, 0));
+    for (const side of [-1, 1]) {
+      const leaf = part(new THREE.SphereGeometry(0.07, 6, 4), PALETTE.flowerLeaf, side * 0.08, 0.2, 0);
+      leaf.scale.set(1, 0.35, 0.7);
       group.add(leaf);
     }
   } else if (type === "shrub") {
@@ -210,25 +225,74 @@ function buildTree(mature) {
   return group;
 }
 
-function buildFlower(mature) {
+// A tulip: a plain stem with two long upright leaves and, in bloom, a rounded red
+// cup with three petal tips. Its stored type is still `flower`, from before it
+// was a tulip, so the plants already in the garden stay valid.
+function buildTulip(mature) {
   const group = new THREE.Group();
-  group.add(part(new THREE.CylinderGeometry(0.025, 0.03, 0.4, 6), PALETTE.flowerStem, 0, 0.2, 0));
+  group.add(part(new THREE.CylinderGeometry(0.022, 0.028, 0.4, 6), PALETTE.flowerStem, 0, 0.2, 0));
   for (const side of [-1, 1]) {
-    const leaf = part(new THREE.ConeGeometry(0.06, 0.16, 4), PALETTE.flowerLeaf, side * 0.08, 0.14, 0);
-    leaf.rotation.z = -side * 1.1;
+    const leaf = part(new THREE.ConeGeometry(0.05, 0.3, 4), PALETTE.flowerLeaf, side * 0.06, 0.15, 0);
+    leaf.rotation.z = -side * 0.3;
+    leaf.scale.z = 0.5;
     group.add(leaf);
   }
   if (mature) {
-    group.add(part(new THREE.SphereGeometry(0.06, 6, 5), PALETTE.petalCentre, 0, 0.45, 0));
-    for (let i = 0; i < 6; i++) {
-      const angle = (i / 6) * Math.PI * 2;
-      const petal = part(new THREE.SphereGeometry(0.07, 6, 4), PALETTE.petal, Math.cos(angle) * 0.11, 0.44, Math.sin(angle) * 0.11);
-      petal.scale.y = 0.45;
-      group.add(petal);
+    const cup = part(new THREE.SphereGeometry(0.085, 8, 6), PALETTE.tulip, 0, 0.47, 0);
+    cup.scale.set(0.9, 1.3, 0.9);
+    group.add(cup);
+    for (let i = 0; i < 3; i++) {
+      const angle = (i / 3) * Math.PI * 2;
+      const tip = part(new THREE.ConeGeometry(0.04, 0.09, 4), PALETTE.tulipDeep, Math.cos(angle) * 0.045, 0.58, Math.sin(angle) * 0.045);
+      tip.rotation.z = -Math.cos(angle) * 0.3;
+      tip.rotation.x = Math.sin(angle) * 0.3;
+      group.add(tip);
     }
   } else {
-    group.add(part(new THREE.SphereGeometry(0.06, 6, 5), PALETTE.flowerBud, 0, 0.43, 0));
+    const bud = part(new THREE.SphereGeometry(0.05, 6, 5), PALETTE.flowerBud, 0, 0.43, 0);
+    bud.scale.y = 1.3;
+    group.add(bud);
   }
+  return group;
+}
+
+// A sunflower: tall and thick-stemmed with broad leaves. In bloom its big yellow
+// head, with a dark centre, faces the front; before that it is a green bud.
+function buildSunflower(mature) {
+  const group = new THREE.Group();
+  const height = mature ? 0.78 : 0.55;
+  group.add(part(new THREE.CylinderGeometry(0.035, 0.045, height, 6), PALETTE.flowerStem, 0, height / 2, 0));
+  for (const [side, y] of [[-1, 0.2], [1, 0.34]]) {
+    const leaf = part(new THREE.SphereGeometry(0.1, 6, 4), PALETTE.flowerLeaf, side * 0.11, y, 0);
+    leaf.scale.set(1, 0.3, 0.65);
+    leaf.rotation.z = side * 0.4;
+    group.add(leaf);
+  }
+  const head = new THREE.Group();
+  head.position.set(0, height + 0.02, 0.04);
+  head.rotation.x = 1.2;
+  if (mature) {
+    // Each petal is laid along the head's face and turned round to its place.
+    const petals = 13;
+    for (let i = 0; i < petals; i++) {
+      const pivot = new THREE.Group();
+      pivot.rotation.y = (i / petals) * Math.PI * 2;
+      const petal = part(
+        new THREE.SphereGeometry(0.075, 8, 6),
+        i % 2 === 0 ? PALETTE.sunPetal : PALETTE.sunPetalDeep,
+        0.2,
+        0,
+        0,
+      );
+      petal.scale.set(1.9, 0.3, 1.05);
+      pivot.add(petal);
+      head.add(pivot);
+    }
+    head.add(part(new THREE.CylinderGeometry(0.115, 0.115, 0.05, 10), PALETTE.sunCentre, 0, 0.01, 0));
+  } else {
+    head.add(part(new THREE.SphereGeometry(0.09, 6, 5), PALETTE.flowerBud, 0, 0, 0));
+  }
+  group.add(head);
   return group;
 }
 
@@ -283,8 +347,14 @@ function buildWilted(type) {
   const group = new THREE.Group();
   if (type === "flower") {
     group.add(part(new THREE.CylinderGeometry(0.025, 0.03, 0.32, 6), PALETTE.wiltedWood, 0, 0.16, 0));
-    group.add(part(new THREE.SphereGeometry(0.06, 6, 5), PALETTE.wiltedFoliage, 0, 0.34, 0));
+    const cup = part(new THREE.SphereGeometry(0.06, 6, 5), PALETTE.wiltedFoliage, 0, 0.34, 0);
+    cup.scale.y = 1.3;
+    group.add(cup);
     group.rotation.z = 0.6;
+  } else if (type === "sunflower") {
+    group.add(part(new THREE.CylinderGeometry(0.035, 0.045, 0.5, 6), PALETTE.wiltedWood, 0, 0.25, 0));
+    group.add(part(new THREE.SphereGeometry(0.1, 6, 5), PALETTE.wiltedFoliage, 0.18, 0.4, 0));
+    group.rotation.z = 0.5;
   } else if (type === "shrub") {
     const bush = part(new THREE.SphereGeometry(0.22, 7, 5), PALETTE.wiltedFoliage, 0, 0.12, 0);
     bush.scale.y = 0.5;
@@ -316,7 +386,8 @@ function buildPlant(type, state) {
   if (state === "sprout") return buildSprout(type);
 
   const mature = state === "mature";
-  if (type === "flower") return buildFlower(mature);
+  if (type === "flower") return buildTulip(mature);
+  if (type === "sunflower") return buildSunflower(mature);
   if (type === "shrub") return buildShrub(mature);
   if (type === "vegetable") return buildVegetable(mature);
   return buildTree(mature);
@@ -597,6 +668,57 @@ const bedBases = BED_CENTRES.map((centre) => {
   return bedBase;
 });
 
+// A low white picket fence round The Flower Garden's base, with a gap where each
+// walkway meets it. It is only for show: it stands between the plots and the path
+// and never limits what anyone can do.
+const FENCE_BED = 1;
+const FENCE_HALF = 2.64;
+const FENCE_BASE_Y = -0.15;
+const FENCE_GAP_HALF = 0.85;
+const FENCE_POST_STEP = 0.3;
+// Pure white, with a little glow of its own so the shaded sides do not read grey.
+const fenceMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.14, flatShading: true });
+const fencePostGeometry = new THREE.BoxGeometry(0.07, 0.34, 0.07);
+const fenceCapGeometry = new THREE.ConeGeometry(0.06, 0.07, 4);
+
+// `gaps` is the set of sides with a walkway: "back", "right", "front" or "left".
+function buildFence(bed, gaps) {
+  const centre = BED_CENTRES[bed];
+  const group = new THREE.Group();
+  group.position.set(centre.x, FENCE_BASE_Y, centre.z);
+  // Each side in turn: which way it runs, and where its line sits.
+  const sides = {
+    back: { along: "x", across: -FENCE_HALF },
+    front: { along: "x", across: FENCE_HALF },
+    left: { along: "z", across: -FENCE_HALF },
+    right: { along: "z", across: FENCE_HALF },
+  };
+  const place = (mesh, side, t, y) => {
+    const { along, across } = sides[side];
+    mesh.position.set(along === "x" ? t : across, y, along === "x" ? across : t);
+    group.add(mesh);
+  };
+  for (const side of Object.keys(sides)) {
+    const segments = gaps.has(side)
+      ? [[-FENCE_HALF, -FENCE_GAP_HALF], [FENCE_GAP_HALF, FENCE_HALF]]
+      : [[-FENCE_HALF, FENCE_HALF]];
+    for (const [from, to] of segments) {
+      for (let t = from; t <= to + 0.001; t += FENCE_POST_STEP) {
+        place(new THREE.Mesh(fencePostGeometry, fenceMaterial), side, t, 0.17);
+        const cap = new THREE.Mesh(fenceCapGeometry, fenceMaterial);
+        cap.rotation.y = Math.PI / 4;
+        place(cap, side, t, 0.375);
+      }
+      for (const y of [0.1, 0.25]) {
+        const length = to - from;
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(...(sides[side].along === "x" ? [length, 0.035, 0.03] : [0.03, 0.035, length])), fenceMaterial);
+        place(rail, side, (from + to) / 2, y);
+      }
+    }
+  }
+  scene.add(group);
+}
+
 // The paths: each bed has its own ring of large flagstones set in earth, where the
 // gardeners walk, and short stone walkways join neighbouring rings. The loop is
 // the square line down the middle of a ring. A figure's position is one fraction
@@ -658,6 +780,16 @@ for (const walkway of WALKWAYS) {
   walkway.bU = toU(walkway.b, walkway.bAlong);
   walkway.length = Math.hypot(walkway.to.x - walkway.from.x, walkway.to.z - walkway.from.z);
 }
+
+// The sides of the fenced bed that a walkway leaves from, so the fence leaves a gap there.
+const fenceGaps = new Set();
+for (const walkway of WALKWAYS) {
+  for (const [bed, along] of [[walkway.a, walkway.aAlong], [walkway.b, walkway.bAlong]]) {
+    if (bed !== FENCE_BED) continue;
+    fenceGaps.add(Object.keys(SIDE_MIDDLE).find((side) => SIDE_MIDDLE[side] === along));
+  }
+}
+buildFence(FENCE_BED, fenceGaps);
 
 
 // Earth showing in the gaps between the stones, so they read as set in the ground
@@ -1189,7 +1321,7 @@ function updateRings(now) {
   }
 }
 
-// Insects: butterflies visit a flower in bloom and bees a shrub in flower, by
+// Insects: butterflies visit a flower in bloom and bees a shrub in flower or a sunflower, by
 // day. They are drawn from primitives like the plants, and their paths are a
 // pure function of the server's clock and the plot, so every visitor sees them
 // in the same places with nothing sent over the wire. They keep away from
@@ -1275,7 +1407,7 @@ function updateInsects(timeSeconds) {
     const plot = plots.get(position);
     let kind = null;
     if (plot && plot.state === "mature" && !isThirsty(plot)) {
-      kind = plot.plantType === "flower" ? "butterfly" : plot.plantType === "shrub" ? "bee" : null;
+      kind = plot.plantType === "flower" ? "butterfly" : (plot.plantType === "shrub" || plot.plantType === "sunflower") ? "bee" : null;
     }
 
     if (obj.insectKind !== kind) {

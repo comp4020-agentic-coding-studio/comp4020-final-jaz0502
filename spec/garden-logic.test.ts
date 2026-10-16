@@ -4,14 +4,14 @@ import { expect, it } from "vitest";
 // (derivePlot), so it is checked here directly with made-up times instead of
 // by waiting. The module reads its durations from the environment when it is
 // loaded, so set them first: a tree sprouts at 1s, grows at 5s and is mature at
-// 10s; a flower takes half as long and a flower shrub three quarters.
+// 10s; a flower takes half as long, a sunflower seven tenths and a flower shrub three quarters.
 process.env.SEED_TO_SPROUT_MS = "1000";
 process.env.SPROUT_TO_GROWING_MS = "4000";
 process.env.GROWING_TO_MATURE_MS = "5000";
 process.env.WILT_WINDOW_MS = "20000";
 const { derivePlot } = await import("../src/garden.ts");
 
-type PlantType = "tree" | "flower" | "shrub";
+type PlantType = "tree" | "flower" | "sunflower" | "shrub";
 
 const stageAt = (plantType: PlantType, age: number): string =>
   derivePlot(
@@ -48,13 +48,20 @@ it("grows a flower in half the time and a flower shrub in three quarters", () =>
   expect(stageAt("shrub", 7500)).toBe("mature");
 });
 
+it("grows a sunflower in seven tenths of the time", () => {
+  expect(stageAt("sunflower", 699)).toBe("planted");
+  expect(stageAt("sunflower", 700)).toBe("sprout");
+  expect(stageAt("sunflower", 3500)).toBe("growing");
+  expect(stageAt("sunflower", 7000)).toBe("mature");
+});
+
 it("has a flower ahead of a tree planted at the same moment", () => {
   expect(stageAt("flower", 5000)).toBe("mature");
   expect(stageAt("tree", 5000)).toBe("growing");
 });
 
 it("wilts every type after the same time without water", () => {
-  for (const type of ["tree", "flower", "shrub"] as const) {
+  for (const type of ["tree", "flower", "sunflower", "shrub"] as const) {
     expect(stageAt(type, 20000)).not.toBe("wilted");
     expect(stageAt(type, 20001)).toBe("wilted");
   }

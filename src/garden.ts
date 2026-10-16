@@ -5,7 +5,7 @@ import type { PlantType, Plot, PlotState } from "./types.ts";
 // plots keep their numbers.
 export const GRID_SIZE = 100;
 
-export const PLANT_TYPES = ["tree", "flower", "shrub", "vegetable"] as const;
+export const PLANT_TYPES = ["tree", "flower", "sunflower", "shrub", "vegetable"] as const;
 
 // What each bed is called and what it takes, in the order of the plots. A bed with
 // `takes: null` takes any plant. This is the one place that says so: the server
@@ -20,7 +20,7 @@ export interface Bed {
 
 export const BEDS: readonly Bed[] = [
   { name: "The Cottage Garden", takes: null, takesText: "any plant" },
-  { name: "The Flower Garden", takes: ["flower", "shrub"], takesText: "flowers and flower shrubs" },
+  { name: "The Flower Garden", takes: ["flower", "sunflower", "shrub"], takesText: "tulips, sunflowers and flower shrubs" },
   { name: "The Fruit Garden", takes: ["tree"], takesText: "fruit trees" },
   { name: "The Vegetable Garden", takes: ["vegetable"], takesText: "vegetables" },
 ];
@@ -59,8 +59,8 @@ export const WILT_WINDOW_MS = Number(process.env.WILT_WINDOW_MS ?? 18 * 60 * 60_
 export const DAY_LENGTH_MS = Number(process.env.DAY_LENGTH_MS ?? 30 * 60_000);
 
 // How fast each type moves through its stages, as a multiple of the tree's
-// durations: a flower blooms in about half the time a tree takes to fruit.
-const GROWTH_SCALE: Record<PlantType, number> = { tree: 1, flower: 0.5, shrub: 0.75, vegetable: 0.6 };
+// durations: a tulip (stored as `flower`) blooms in about half the time a tree takes to fruit.
+const GROWTH_SCALE: Record<PlantType, number> = { tree: 1, flower: 0.5, sunflower: 0.7, shrub: 0.75, vegetable: 0.6 };
 
 export function emptyPlot(position: number): Plot {
   return {
