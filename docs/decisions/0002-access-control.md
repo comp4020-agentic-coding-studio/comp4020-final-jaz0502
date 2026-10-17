@@ -17,6 +17,7 @@ What each person may **see**:
 What each person may **change**, all decided by the server from the plot's stored state, not by anything the page says:
 - Plant only an empty plot. Compost only a wilted one. Water any plot that is neither empty nor wilted. So nobody can overwrite or remove another gardener's healthy plant, and two people acting at once cannot both win.
 - Nobody owns a plot. Anyone may water anyone's plot. That is the point of the garden, and it is a rule, not an oversight.
+- Plant in a bed only what it takes: each of the four beds has a theme, and the server turns away any other plant (409). Only planting is limited this way, so anyone may still water or compost in any bed.
 - Act on plots only so often: a budget of 15 plants, waterings and compostings in any 10 seconds, counted per person on the server, with refused attempts counted too. Past it the server answers 429 with `Retry-After` and changes nothing.
 - Move their own figure and wave. Both are validated and rate-limited, and a gardener must have the event stream open to do either.
 
@@ -51,6 +52,7 @@ For how often someone may act on plots, three options:
 - `spec/privacy.test.ts`: the cookie never reaches another visitor, only the public id, and the public id is stable per person and differs between people.
 - `spec/plots.test.ts`: only an empty plot can be planted, a wilted plot cannot be watered, composting needs a wilted plot, two simultaneous plants cannot both win.
 - `spec/limits.test.ts`: a person can act up to the budget and no further, the 429 changes nothing and says when to try again, refused attempts count, the budget comes back after the window, and one person's flood never stops another.
+- `spec/beds.test.ts`: each bed takes its own plants and turns the others away at both ends of the bed and by hand, the refusal is logged without the cookie and counts against the limit, and the page is told each bed's name and theme.
 - `spec/stats.test.ts`: your record goes to you and nobody else.
 - `spec/presence.test.ts` and `spec/wave.test.ts`: moves and waves are validated and rate-limited, and refused from someone not connected.
 - `spec/logging.test.ts`: the log names who did what, with the public id, and never contains a cookie. `spec/limits.test.ts` also checks a flood is logged once.

@@ -2,7 +2,7 @@
 
 ## What "good" means
 
-For this app, "good" means that many people can be online at the same time, all working on the same shared garden. When someone plants something, it shows up in the garden for everyone, without a reload. You can also see that other people are there: each gardener is a small figure that walks the stone paths round the garden's four beds, and a "Who's here" list shows how many people are online. You can go from one bed to another by clicking it.
+For this app, "good" means that many people can be online at the same time, all working on the same shared garden. When someone plants something, it shows up in the garden for everyone, without a reload. You can also see that other people are there: each gardener is a small figure that walks the stone paths round the garden's four beds, and a "Who's here" list shows how many people are online. You can go from one bed to another by clicking it. Each bed has a name and a theme: The Cottage Garden grows lavender, rosemary and foxglove, The Flower Garden tulips, sunflowers and flower shrubs, The Fruit Garden apple trees, strawberries and blueberries, and The Vegetable Garden carrots, tomatoes and lettuces. A bed takes only what suits it, and each has its own fence.
 
 The garden is cooperative. Anyone can plant an empty plot and anyone can water any plot, so nobody owns anything. Plants that nobody waters for some time wilt, and someone has to compost a wilted plot before anything new can grow there. The garden only stays alive because people look after it. It should not have a scoring system, a ranking, or any win or lose situation. The goal is a shared, collaborative space.
 
@@ -26,7 +26,8 @@ Some of "good" is checked by automated tests in `spec/`:
 
 - Only an empty plot can be planted. A user cannot plant in a spot where there is already a plant, and two people planting the same plot at the same moment cannot both succeed.
 - Anyone can water anyone's plot, and watering resets how long a plant has before it wilts.
-- The garden has four beds of 25 plots, and planting, watering and composting work the same in each.
+- The garden has four beds of 25 plots, and watering and composting work the same in each.
+- Each bed takes only its own plants. The server turns away a plant the bed does not take, whether it is sent from the page or by hand, and nothing changes. Anyone can still water or compost in any bed.
 - A wilted plot cannot be watered or replanted until someone composts it.
 - A visitor's cookie is never sent to anyone else. Other people only ever see a one-way public id, and the colours come from that id.
 - Everyone who joins is told who is already here, a gardener's move reaches the others within a second, and two tabs from one browser are one gardener. Moves are checked and limited, so invalid ones, ones from someone not connected, and ones sent too fast are refused.
@@ -43,6 +44,7 @@ The rest can only be judged by a person:
 - Persistence: Plants must survive a restart or a redeployment, but the container in CI cannot restart in the middle of a test run, so no test can prove it. I judged it by having the agent restart the live machine on Fly and check that the planted plots were still there.
 - Real-time updates to plots: A change in one browser should appear in the others within about a second. There is no test for this, because proving that a change reaches two independent browsers needs real browsers. I judged it by watching two browsers side by side.
 - Whether it feels like other people are there: how the figures and icons look and read is a matter for a person.
+- How the beds look: each bed's fence, plants and colours are for a person to judge. Nothing about them affects what anyone can do.
 - The absence of scoring: Nothing in the app keeps score, and that is a design choice rather than something a test can show.
 
 ## What I looked at
