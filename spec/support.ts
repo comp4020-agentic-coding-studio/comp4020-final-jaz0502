@@ -93,6 +93,12 @@ export interface Visitor {
   post: (position: number, action: string, body?: unknown) => Promise<{ status: number; body: PlotView }>;
 }
 
+// A plant the plot's bed takes, for specs that are about something other than which
+// bed takes what: lavender in The Cottage Garden, a sunflower in The Flower Garden,
+// an apple tree in The Fruit Garden and a carrot in The Vegetable Garden.
+export const plantFor = (position: number): string =>
+  position < 25 ? "lavender" : position < 50 ? "sunflower" : position < 75 ? "tree" : "vegetable";
+
 // A visitor is just a cookie: a fresh gid is a fresh person.
 export function newVisitor(url: string): Visitor {
   const gid = randomUUID();

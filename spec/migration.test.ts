@@ -64,7 +64,7 @@ it("gains the other beds, empty, and leaves the first bed's plots where they wer
 });
 
 it("still lets the migrated garden take a new kind of plant", async () => {
-  const { status, body } = await newVisitor(app.url).post(4, "plant", { type: "flower" });
+  const { status, body } = await newVisitor(app.url).post(4, "plant", { type: "lavender" });
   expect(status).toBe(200);
-  expect(body.plantType).toBe("flower");
+  expect(body.plantType).toBe("lavender");
 });

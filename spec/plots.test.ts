@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { publicId } from "../src/identity.ts";
-import { type PrivateApp, newVisitor, readPlots, sleep, startApp } from "./support.ts";
+import { newVisitor, plantFor, readPlots, sleep, startApp, type PrivateApp } from "./support.ts";
 
 // The garden's rules: who can plant, water and compost what, and when.
 // Each test uses its own plot so they don't depend on each other. These run
@@ -22,7 +22,7 @@ const plotAt = async (position: number) => (await readPlots(app.url)).find((p) =
 describe("planting", () => {
   it("plants an empty plot and records who planted it", async () => {
     const alice = newVisitor(app.url);
-    const { status, body } = await alice.post(0, "plant");
+    const { status, body } = await alice.post(0, "plant", { type: plantFor(0) });
     expect(status).toBe(200);
     expect(body.state).toBe("planted");
     expect(body.plantedBy).toBe(publicId(alice.gid));
@@ -32,24 +32,24 @@ describe("planting", () => {
   it("refuses to plant a plot that already has a plant, and leaves it untouched", async () => {
     const alice = newVisitor(app.url);
     const bob = newVisitor(app.url);
-    expect((await alice.post(1, "plant")).status).toBe(200);
+    expect((await alice.post(1, "plant", { type: plantFor(1) })).status).toBe(200);
 
-    expect((await bob.post(1, "plant")).status).toBe(409);
+    expect((await bob.post(1, "plant", { type: plantFor(1) })).status).toBe(409);
     expect((await plotAt(1)).plantedBy).toBe(publicId(alice.gid));
   });
 
   it("lets only one of two simultaneous plants win", async () => {
     const alice = newVisitor(app.url);
     const bob = newVisitor(app.url);
-    const results = await Promise.all([alice.post(2, "plant"), bob.post(2, "plant")]);
+    const results = await Promise.all([alice.post(2, "plant", { type: plantFor(2) }), bob.post(2, "plant", { type: plantFor(2) })]);
     expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
   });
 
   it("plants in the other beds just as in the first", async () => {
     const alice = newVisitor(app.url);
-    // A plant each bed takes: a flower in The Flower Garden, a tree in The Fruit Garden
-    // and a vegetable in The Vegetable Garden.
-    for (const [position, type] of [[30, "flower"], [60, "tree"], [99, "vegetable"]] as const) {
+    // A plant each bed takes: lavender in The Cottage Garden, a flower in The Flower
+    // Garden, a tree in The Fruit Garden and a vegetable in The Vegetable Garden.
+    for (const [position, type] of [[8, "lavender"], [30, "flower"], [60, "tree"], [99, "vegetable"]] as const) {
       expect((await alice.post(position, "plant", { type })).status).toBe(200);
       expect((await alice.post(position, "water")).status).toBe(200);
       expect(await plotAt(position)).toMatchObject({ plantType: type, plantedBy: publicId(alice.gid) });
@@ -58,7 +58,7 @@ describe("planting", () => {
   });
 
   it("rejects a position outside the beds", async () => {
-    const { status } = await newVisitor(app.url).post(100, "plant");
+    const { status } = await newVisitor(app.url).post(100, "plant", { type: plantFor(100) });
     expect(status).toBeGreaterThanOrEqual(400);
     expect(status).toBeLessThan(500);
   });
@@ -69,22 +69,27 @@ describe("planting", () => {
 });
 
 describe("plant types", () => {
-  it("plants a tree, a flower, a sunflower, a flower shrub, a carrot, a tomato, a lettuce, a strawberry or a blueberry as asked, and a tree if not told", async () => {
+  it("plants every kind of plant as asked, in a bed that takes it, and a tree if not told", async () => {
     const alice = newVisitor(app.url);
-    expect((await alice.post(12, "plant", { type: "flower" })).body.plantType).toBe("flower");
-    expect((await alice.post(13, "plant", { type: "shrub" })).body.plantType).toBe("shrub");
-    expect((await alice.post(14, "plant", { type: "tree" })).body.plantType).toBe("tree");
-    expect((await alice.post(15, "plant")).body.plantType).toBe("tree");
-    expect((await alice.post(17, "plant", { type: "vegetable" })).body.plantType).toBe("vegetable");
-    expect((await alice.post(18, "plant", { type: "sunflower" })).body.plantType).toBe("sunflower");
-    expect((await alice.post(19, "plant", { type: "tomato" })).body.plantType).toBe("tomato");
-    expect((await alice.post(22, "plant", { type: "lettuce" })).body.plantType).toBe("lettuce");
-    expect((await alice.post(23, "plant", { type: "strawberry" })).body.plantType).toBe("strawberry");
-    expect((await alice.post(24, "plant", { type: "blueberry" })).body.plantType).toBe("blueberry");
+    // Where each kind goes: the Cottage Garden takes lavender, rosemary and foxglove, the
+    // Flower Garden a tulip (stored as flower), a sunflower and a shrub, the Fruit Garden an
+    // apple tree (stored as tree), a strawberry and a blueberry, and the Vegetable Garden a
+    // carrot (stored as vegetable), a tomato and a lettuce.
+    const plan: [number, string][] = [
+      [12, "lavender"], [13, "rosemary"], [14, "foxglove"],
+      [26, "flower"], [27, "sunflower"], [28, "shrub"],
+      [51, "tree"], [53, "strawberry"], [54, "blueberry"],
+      [76, "vegetable"], [77, "tomato"], [78, "lettuce"],
+    ];
+    for (const [position, type] of plan) {
+      expect((await alice.post(position, "plant", { type })).body.plantType).toBe(type);
+    }
+    // Leaving the type out plants a tree, in a bed that takes one.
+    expect((await alice.post(52, "plant")).body.plantType).toBe("tree");
 
     // Everyone else sees the same types.
-    expect((await plotAt(12)).plantType).toBe("flower");
-    expect((await plotAt(13)).plantType).toBe("shrub");
+    expect((await plotAt(12)).plantType).toBe("lavender");
+    expect((await plotAt(28)).plantType).toBe("shrub");
   });
 
   it("rejects a plant type it doesn't know and leaves the plot empty", async () => {
@@ -106,7 +111,7 @@ describe("watering", () => {
   it("lets anyone water any plot, not just their own", async () => {
     const alice = newVisitor(app.url);
     const bob = newVisitor(app.url);
-    await alice.post(4, "plant");
+    await alice.post(4, "plant", { type: plantFor(4) });
 
     const { status, body } = await bob.post(4, "water");
     expect(status).toBe(200);
@@ -116,7 +121,7 @@ describe("watering", () => {
 
   it("resets the wilt clock, so a watered plant outlives the unwatered window", { timeout: 10_000 }, async () => {
     const alice = newVisitor(app.url);
-    await alice.post(5, "plant");
+    await alice.post(5, "plant", { type: plantFor(5) });
 
     await sleep(WILT_MS * 0.6);
     expect((await alice.post(5, "water")).status).toBe(200);
@@ -135,7 +140,7 @@ describe("composting", () => {
 
   it("refuses to compost a plant that is still alive", async () => {
     const alice = newVisitor(app.url);
-    await alice.post(6, "plant");
+    await alice.post(6, "plant", { type: plantFor(6) });
 
     expect((await alice.post(6, "compost")).status).toBe(409);
     expect((await plotAt(6)).state).toBe("planted");
@@ -147,23 +152,23 @@ describe("composting", () => {
     async () => {
       const alice = newVisitor(app.url);
       const bob = newVisitor(app.url);
-      await alice.post(7, "plant");
+      await alice.post(7, "plant", { type: plantFor(7) });
 
       await sleep(WILT_MS + 300);
       expect((await plotAt(7)).state).toBe("wilted");
 
       expect((await bob.post(7, "water")).status).toBe(409);
-      expect((await bob.post(7, "plant")).status).toBe(409);
+      expect((await bob.post(7, "plant", { type: plantFor(7) })).status).toBe(409);
 
       const composted = await bob.post(7, "compost");
       expect(composted.status).toBe(200);
       expect(composted.body.state).toBe("empty");
       expect(composted.body.plantedBy).toBeNull();
 
-      // Once composted it is an ordinary empty plot, so it can take any plant.
-      const replanted = await bob.post(7, "plant", { type: "flower" });
+      // Once composted it is an ordinary empty plot, so it can take a plant its bed takes.
+      const replanted = await bob.post(7, "plant", { type: "rosemary" });
       expect(replanted.status).toBe(200);
-      expect(replanted.body.plantType).toBe("flower");
+      expect(replanted.body.plantType).toBe("rosemary");
     },
   );
 });
@@ -178,18 +183,18 @@ describe("a vegetable", () => {
     });
     try {
       const alice = newVisitor(stagesApp.url);
-      await alice.post(20, "plant", { type: "vegetable" });
-      await alice.post(21, "plant", { type: "tree" });
+      await alice.post(80, "plant", { type: "vegetable" });
+      await alice.post(60, "plant", { type: "tree" });
 
       const stateAt = async (position: number) => (await readPlots(stagesApp.url)).find((p) => p.position === position)!.state;
-      expect(await stateAt(20)).toBe("planted");
+      expect(await stateAt(80)).toBe("planted");
 
       // Quicker than a tree (0.6 of its time), but it does get there: sprout, growing, mature.
       await sleep(500);
-      expect(["sprout", "growing"]).toContain(await stateAt(20));
+      expect(["sprout", "growing"]).toContain(await stateAt(80));
       await sleep(900);
-      expect(await stateAt(20)).toBe("mature");
-      expect(await stateAt(21)).not.toBe("planted");
+      expect(await stateAt(80)).toBe("mature");
+      expect(await stateAt(60)).not.toBe("planted");
     } finally {
       await stagesApp.stop();
     }

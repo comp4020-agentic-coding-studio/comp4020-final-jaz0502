@@ -26,9 +26,9 @@ const WATER_DURATION_MS = 900;
 // The last quarter of a plot's wilt window counts as "thirsty".
 const THIRSTY_FRACTION = 0.25;
 
-const PLANT_TYPES = ["tree", "flower", "sunflower", "shrub", "vegetable", "tomato", "lettuce", "strawberry", "blueberry"];
+const PLANT_TYPES = ["tree", "flower", "sunflower", "shrub", "vegetable", "tomato", "lettuce", "strawberry", "blueberry", "lavender", "rosemary", "foxglove"];
 
-const PLANT_NAME = { tree: "Apple tree", flower: "Tulip", sunflower: "Sunflower", shrub: "Flower shrub", vegetable: "Carrot", tomato: "Tomato", lettuce: "Lettuce", strawberry: "Strawberry", blueberry: "Blueberry" };
+const PLANT_NAME = { tree: "Apple tree", flower: "Tulip", sunflower: "Sunflower", shrub: "Flower shrub", vegetable: "Carrot", tomato: "Tomato", lettuce: "Lettuce", strawberry: "Strawberry", blueberry: "Blueberry", lavender: "Lavender", rosemary: "Rosemary", foxglove: "Foxglove" };
 
 // The same four growth stages mean different things for each plant.
 const STAGE_LABEL = {
@@ -41,6 +41,9 @@ const STAGE_LABEL = {
   lettuce: { planted: "just planted", sprout: "sprouting", growing: "growing", mature: "ready to pick" },
   strawberry: { planted: "just planted", sprout: "sprouting", growing: "flowering", mature: "ripe" },
   blueberry: { planted: "just planted", sprout: "sprouting", growing: "growing", mature: "ripe" },
+  lavender: { planted: "just planted", sprout: "sprouting", growing: "growing", mature: "in bloom" },
+  rosemary: { planted: "just planted", sprout: "sprouting", growing: "growing", mature: "in flower" },
+  foxglove: { planted: "just planted", sprout: "sprouting", growing: "budding", mature: "in bloom" },
 };
 
 const PALETTE = {
@@ -90,6 +93,20 @@ const PALETTE = {
   blueberryLeafLight: 0x7cc47a,
   blueberryTwig: 0x6e4a2a,
   seedBerry: 0xb8a58a,
+  lavenderLeaf: 0x8aa88a,
+  lavender: 0xa98ae0,
+  lavenderDeep: 0x8a5fd0,
+  rosemaryLeaf: 0x3e6e4a,
+  rosemaryLight: 0x5a8a5a,
+  rosemaryBlue: 0x6a8fe0,
+  foxglovePink: 0xd96aa8,
+  foxgloveDeep: 0xb8408a,
+  foxgloveLeaf: 0x5a9a4a,
+  hedge: 0x2a5e30,
+  hedgeMid: 0x3a7d40,
+  hedgeLight: 0x4a9150,
+  rose: 0xf06a8a,
+  roseDeep: 0xd0406a,
   wiltedWood: 0x8a6b4f,
   wiltedFoliage: 0xab8f66,
 };
@@ -189,6 +206,9 @@ const SEED_COLOUR = {
   lettuce: PALETTE.seedLettuce,
   strawberry: PALETTE.seedBerry,
   blueberry: PALETTE.seedBerry,
+  lavender: 0x7a6a5a,
+  rosemary: 0x6a5a40,
+  foxglove: 0x8a7a6a,
 };
 
 function buildSeeds(type) {
@@ -241,6 +261,29 @@ function buildSprout(type) {
     for (const side of [-1, 1]) {
       const leaf = part(new THREE.SphereGeometry(0.045, 6, 4), PALETTE.blueberryLeaf, side * 0.05, 0.19, 0);
       leaf.scale.set(1, 0.45, 0.8);
+      group.add(leaf);
+    }
+  } else if (type === "lavender") {
+    for (let i = 0; i < 3; i++) {
+      const angle = (i / 3) * Math.PI * 2;
+      const blade = part(new THREE.ConeGeometry(0.018, 0.17, 4), PALETTE.lavenderLeaf, Math.cos(angle) * 0.04, 0.085, Math.sin(angle) * 0.04);
+      blade.rotation.z = -Math.cos(angle) * 0.3;
+      blade.rotation.x = Math.sin(angle) * 0.3;
+      group.add(blade);
+    }
+  } else if (type === "rosemary") {
+    group.add(part(new THREE.CylinderGeometry(0.014, 0.018, 0.14, 5), PALETTE.blueberryTwig, 0, 0.07, 0));
+    for (const side of [-1, 1]) {
+      const needles = part(new THREE.ConeGeometry(0.02, 0.12, 4), PALETTE.rosemaryLight, side * 0.03, 0.17, 0);
+      needles.rotation.z = -side * 0.4;
+      group.add(needles);
+    }
+  } else if (type === "foxglove") {
+    for (let i = 0; i < 3; i++) {
+      const angle = (i / 3) * Math.PI * 2;
+      const leaf = part(new THREE.SphereGeometry(0.07, 6, 4), PALETTE.foxgloveLeaf, Math.cos(angle) * 0.06, 0.03, Math.sin(angle) * 0.06);
+      leaf.scale.set(1, 0.25, 0.7);
+      leaf.rotation.y = -angle;
       group.add(leaf);
     }
   } else if (type === "lettuce") {
@@ -491,6 +534,94 @@ function buildBlueberry(mature) {
   return group;
 }
 
+// Lavender: a low clump of grey-green leaves with thin stems rising from it. In
+// bloom each stem ends in a long purple spike; before that it ends in a green bud.
+function buildLavender(mature) {
+  const group = new THREE.Group();
+  const clump = part(new THREE.SphereGeometry(0.13, 7, 4), PALETTE.lavenderLeaf, 0, 0.06, 0);
+  clump.scale.y = 0.6;
+  group.add(clump);
+  const stems = mature ? 9 : 6;
+  for (let i = 0; i < stems; i++) {
+    const angle = (i / stems) * Math.PI * 2 + 0.4;
+    const height = (mature ? 0.4 : 0.26) + (i % 3) * 0.04;
+    const lean = 0.18;
+    const base = 0.04 + (i % 3) * 0.03;
+    const stem = part(new THREE.CylinderGeometry(0.008, 0.011, height, 5), PALETTE.lavenderLeaf, Math.cos(angle) * base, height / 2 + 0.03, Math.sin(angle) * base);
+    stem.rotation.z = -Math.cos(angle) * lean;
+    stem.rotation.x = Math.sin(angle) * lean;
+    group.add(stem);
+    const topX = Math.cos(angle) * (base + height * lean);
+    const topZ = Math.sin(angle) * (base + height * lean);
+    if (mature) {
+      const spike = part(new THREE.SphereGeometry(0.03, 6, 5), i % 2 === 0 ? PALETTE.lavender : PALETTE.lavenderDeep, topX, height + 0.04, topZ);
+      spike.scale.y = 2.8;
+      group.add(spike);
+    } else {
+      group.add(part(new THREE.SphereGeometry(0.018, 5, 4), PALETTE.lavenderLeaf, topX, height + 0.04, topZ));
+    }
+  }
+  return group;
+}
+
+// Rosemary: a woody little bush of upright, needle-leaved sprigs, with tiny blue
+// flowers along the tips once it is in flower.
+function buildRosemary(mature) {
+  const group = new THREE.Group();
+  group.add(part(new THREE.CylinderGeometry(0.02, 0.03, 0.14, 5), PALETTE.blueberryTwig, 0, 0.07, 0));
+  const sprigs = mature ? 11 : 7;
+  const height = mature ? 0.4 : 0.3;
+  for (let i = 0; i < sprigs; i++) {
+    const angle = i * 2.4;
+    const radius = 0.03 + (i % 3) * 0.035;
+    const sprig = part(new THREE.ConeGeometry(0.035, height, 4), i % 2 === 0 ? PALETTE.rosemaryLeaf : PALETTE.rosemaryLight, Math.cos(angle) * radius, height / 2 + 0.06, Math.sin(angle) * radius);
+    sprig.rotation.z = -Math.cos(angle) * 0.22;
+    sprig.rotation.x = Math.sin(angle) * 0.22;
+    group.add(sprig);
+    if (mature && i % 2 === 0) {
+      const tipX = Math.cos(angle) * (radius + height * 0.22 * 0.8);
+      const tipZ = Math.sin(angle) * (radius + height * 0.22 * 0.8);
+      group.add(part(new THREE.SphereGeometry(0.026, 5, 4), PALETTE.rosemaryBlue, tipX, height * 0.8 + 0.08, tipZ));
+    }
+  }
+  return group;
+}
+
+// A foxglove: a tall spire with a rosette of leaves at its foot. In bloom pink bells
+// hang down the stem, biggest at the bottom and spiralling round; before that, only
+// small buds at the top.
+function buildFoxglove(mature) {
+  const group = new THREE.Group();
+  const height = mature ? 0.74 : 0.46;
+  group.add(part(new THREE.CylinderGeometry(0.018, 0.028, height, 6), PALETTE.foxgloveLeaf, 0, height / 2, 0));
+  for (let i = 0; i < 4; i++) {
+    const angle = (i / 4) * Math.PI * 2 + 0.3;
+    const leaf = part(new THREE.SphereGeometry(0.09, 6, 4), PALETTE.foxgloveLeaf, Math.cos(angle) * 0.08, 0.04, Math.sin(angle) * 0.08);
+    leaf.scale.set(1, 0.25, 0.65);
+    leaf.rotation.y = -angle;
+    group.add(leaf);
+  }
+  if (mature) {
+    const bells = 9;
+    for (let i = 0; i < bells; i++) {
+      const t = i / (bells - 1);
+      const y = 0.26 + t * (height - 0.3);
+      const angle = i * 2.2;
+      const size = 1 - t * 0.5;
+      const bell = part(new THREE.ConeGeometry(0.05 * size, 0.1 * size, 6), i % 2 === 0 ? PALETTE.foxglovePink : PALETTE.foxgloveDeep, Math.cos(angle) * 0.055, y, Math.sin(angle) * 0.055);
+      bell.rotation.x = Math.PI;
+      group.add(bell);
+    }
+    group.add(part(new THREE.SphereGeometry(0.022, 5, 4), PALETTE.foxglovePink, 0, height + 0.01, 0));
+  } else {
+    for (let i = 0; i < 4; i++) {
+      const angle = i * 2.2;
+      group.add(part(new THREE.SphereGeometry(0.028, 5, 4), PALETTE.foxgloveLeaf, Math.cos(angle) * 0.04, height - 0.02 - i * 0.045, Math.sin(angle) * 0.04));
+    }
+  }
+  return group;
+}
+
 // wilted: a collapsed, drooping, brown version of whichever plant it was.
 function buildWilted(type) {
   const group = new THREE.Group();
@@ -526,6 +657,28 @@ function buildWilted(type) {
     bush.scale.y = 0.5;
     group.add(bush);
     group.rotation.z = 0.25;
+  } else if (type === "lavender") {
+    const clump = part(new THREE.SphereGeometry(0.13, 7, 4), PALETTE.wiltedFoliage, 0, 0.04, 0);
+    clump.scale.y = 0.45;
+    group.add(clump);
+    for (let i = 0; i < 4; i++) {
+      const stem = part(new THREE.CylinderGeometry(0.008, 0.01, 0.22, 4), PALETTE.wiltedWood, Math.cos(i * 1.6) * 0.07, 0.08, Math.sin(i * 1.6) * 0.07);
+      stem.rotation.z = Math.cos(i * 1.6) * 1.1;
+      stem.rotation.x = -Math.sin(i * 1.6) * 1.1;
+      group.add(stem);
+    }
+  } else if (type === "rosemary") {
+    group.add(part(new THREE.CylinderGeometry(0.02, 0.03, 0.14, 5), PALETTE.wiltedWood, 0, 0.07, 0));
+    const bush = part(new THREE.SphereGeometry(0.16, 7, 5), PALETTE.wiltedFoliage, 0, 0.14, 0);
+    bush.scale.y = 0.5;
+    group.add(bush);
+    group.rotation.z = 0.2;
+  } else if (type === "foxglove") {
+    group.add(part(new THREE.CylinderGeometry(0.018, 0.028, 0.5, 6), PALETTE.wiltedWood, 0, 0.25, 0));
+    for (let i = 0; i < 3; i++) {
+      group.add(part(new THREE.SphereGeometry(0.03, 5, 4), PALETTE.wiltedFoliage, 0.04, 0.2 + i * 0.08, 0));
+    }
+    group.rotation.z = 0.55;
   } else if (type === "lettuce") {
     for (let i = 0; i < 5; i++) {
       const leaf = part(new THREE.SphereGeometry(0.1, 7, 4), PALETTE.wiltedFoliage, Math.cos(i * 1.3) * 0.1, 0.03, Math.sin(i * 1.3) * 0.1);
@@ -566,6 +719,9 @@ function buildPlant(type, state) {
   if (type === "lettuce") return buildLettuce(mature);
   if (type === "strawberry") return buildStrawberry(mature);
   if (type === "blueberry") return buildBlueberry(mature);
+  if (type === "lavender") return buildLavender(mature);
+  if (type === "rosemary") return buildRosemary(mature);
+  if (type === "foxglove") return buildFoxglove(mature);
   return buildTree(mature);
 }
 
@@ -852,7 +1008,7 @@ const FENCE_BASE_Y = -0.15;
 const FENCE_GAP_HALF = 0.85;
 
 // Which bed has which fence, and the sides of each that a walkway leaves from.
-const FENCES = { 1: "picket", 2: "log", 3: "wattle" };
+const FENCES = { 0: "hedge", 1: "picket", 2: "log", 3: "wattle" };
 
 // Pure white, with a little glow of its own so the shaded sides do not read grey.
 const picketMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.14, flatShading: true });
@@ -869,6 +1025,16 @@ const wattleRodMaterials = [flatMaterial(0xa87a46), flatMaterial(0x8a6236)];
 const LOG_STEP = 0.66;
 const logPostGeometry = new THREE.CylinderGeometry(0.06, 0.07, 0.36, 7);
 const logMaterials = [flatMaterial(0x7a5230), flatMaterial(0x6a4626), flatMaterial(0x8a6038)];
+
+// Box hedge: a clipped low hedge, a dark green block with rounded tufts along its
+// top, and at each opening an arch of roses over the path.
+const hedgeMaterials = [PALETTE.hedge, PALETTE.hedgeMid, PALETTE.hedgeLight].map((colour) => flatMaterial(colour));
+const hedgeBallGeometry = new THREE.SphereGeometry(0.15, 7, 5);
+const roseMaterials = [PALETTE.rose, PALETTE.roseDeep].map((colour) => flatMaterial(colour));
+const roseGeometry = new THREE.SphereGeometry(0.052, 6, 5);
+const archLeafGeometry = new THREE.SphereGeometry(0.06, 6, 4);
+const ARCH_SPRING_Y = 0.42;
+const ARCH_RISE = 0.4;
 
 // `place(mesh, side, t, y, lift)` puts a mesh at t along the side; `lift` moves it
 // out from (+) or in toward (-) the side's line.
@@ -888,6 +1054,28 @@ function buildFence(bed, kind, gaps) {
     mesh.position.set(along === "x" ? t : offset, y, along === "x" ? offset : t);
     group.add(mesh);
   };
+  // A rose arch over a walkway opening: two posts and a half ring of green, with
+  // roses and leaves growing over it.
+  const buildArch = (side) => {
+    const along = sides[side].along;
+    for (const t of [-FENCE_GAP_HALF, FENCE_GAP_HALF]) {
+      place(new THREE.Mesh(new THREE.BoxGeometry(0.09, ARCH_SPRING_Y, 0.09), hedgeMaterials[0]), side, t, ARCH_SPRING_Y / 2);
+    }
+    const arc = new THREE.Mesh(new THREE.TorusGeometry(FENCE_GAP_HALF, 0.045, 6, 18, Math.PI), hedgeMaterials[1]);
+    arc.scale.y = ARCH_RISE;
+    arc.rotation.y = along === "x" ? 0 : Math.PI / 2;
+    place(arc, side, 0, ARCH_SPRING_Y);
+    for (let k = 0; k <= 10; k++) {
+      const angle = (k / 10) * Math.PI;
+      const t = Math.cos(angle) * FENCE_GAP_HALF;
+      const y = ARCH_SPRING_Y + Math.sin(angle) * FENCE_GAP_HALF * ARCH_RISE;
+      if (k % 2 === 0) place(new THREE.Mesh(roseGeometry, roseMaterials[(k / 2) % 2]), side, t, y + 0.03, 0.03);
+      else place(new THREE.Mesh(archLeafGeometry, hedgeMaterials[2]), side, t, y, -0.03);
+    }
+    for (const sign of [-1, 1]) {
+      for (const y of [0.12, 0.26, 0.38]) place(new THREE.Mesh(roseGeometry, roseMaterials[Math.round(y * 10) % 2]), side, sign * FENCE_GAP_HALF, y, 0.05);
+    }
+  };
   const box = (side, length, height, thickness) => new THREE.BoxGeometry(...(sides[side].along === "x" ? [length, height, thickness] : [thickness, height, length]));
 
   for (const side of Object.keys(sides)) {
@@ -903,6 +1091,15 @@ function buildFence(bed, kind, gaps) {
           place(cap, side, t, 0.375);
         }
         for (const y of [0.1, 0.25]) place(new THREE.Mesh(box(side, to - from, 0.035, 0.03), picketMaterial), side, (from + to) / 2, y);
+      } else if (kind === "hedge") {
+        const length = to - from;
+        place(new THREE.Mesh(box(side, length, 0.26, 0.26), hedgeMaterials[0]), side, (from + to) / 2, 0.13);
+        const count = Math.max(2, Math.round(length / 0.3));
+        for (let i = 0; i < count; i++) {
+          const tuft = new THREE.Mesh(hedgeBallGeometry, hedgeMaterials[1 + (i % 2)]);
+          tuft.scale.set(1, 0.65, 1);
+          place(tuft, side, from + (i + 0.5) * (length / count), 0.29);
+        }
       } else if (kind === "log") {
         const count = Math.max(1, Math.round((to - from) / LOG_STEP));
         const step = (to - from) / count;
@@ -933,6 +1130,7 @@ function buildFence(bed, kind, gaps) {
         }
       }
     }
+    if (kind === "hedge" && gaps.has(side)) buildArch(side);
   }
   scene.add(group);
 }
@@ -1626,7 +1824,7 @@ function updateInsects(timeSeconds) {
     const plot = plots.get(position);
     let kind = null;
     if (plot && plot.state === "mature" && !isThirsty(plot)) {
-      kind = plot.plantType === "flower" ? "butterfly" : (plot.plantType === "shrub" || plot.plantType === "sunflower") ? "bee" : null;
+      kind = plot.plantType === "flower" ? "butterfly" : (plot.plantType === "shrub" || plot.plantType === "sunflower" || plot.plantType === "lavender" || plot.plantType === "foxglove") ? "bee" : null;
     }
 
     if (obj.insectKind !== kind) {

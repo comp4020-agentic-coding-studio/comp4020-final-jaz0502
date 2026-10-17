@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { publicId } from "../src/identity.ts";
-import { type PrivateApp, newVisitor, openStream, postPresence, postWave, sleep, startApp } from "./support.ts";
+import { newVisitor, openStream, plantFor, postPresence, postWave, sleep, startApp, type PrivateApp } from "./support.ts";
 
 // The server says what each gardener did, one line each, so someone watching
 // `flyctl logs` can follow the garden. The lines name the public id and never the
@@ -20,11 +20,11 @@ describe("the server's log", () => {
     const alice = newVisitor(app.url);
     const id = publicId(alice.gid);
 
-    await alice.post(0, "plant", { type: "flower" });
+    await alice.post(0, "plant", { type: "lavender" });
     await alice.post(0, "water");
 
     const lines = linesFor(id);
-    expect(lines).toContain(`who=${id} hue=${parseInt(id.slice(0, 6), 16) % 360} did=plant plot=0 type=flower result=ok`);
+    expect(lines).toContain(`who=${id} hue=${parseInt(id.slice(0, 6), 16) % 360} did=plant plot=0 type=lavender result=ok`);
     expect(lines.some((l) => l.includes("did=water plot=0 result=ok"))).toBe(true);
   });
 
@@ -33,8 +33,8 @@ describe("the server's log", () => {
     const id = publicId(alice.gid);
 
     await alice.post(1, "water"); // nothing planted
-    await alice.post(2, "plant");
-    await alice.post(2, "plant"); // already taken
+    await alice.post(2, "plant", { type: plantFor(2) });
+    await alice.post(2, "plant", { type: plantFor(2) }); // already taken
     await alice.post(2, "compost"); // not wilted
     await alice.post(3, "plant", { type: "cactus" }); // not a plant type
 
@@ -104,7 +104,7 @@ describe("the server's log", () => {
   it("never writes the cookie, only the public id", async () => {
     const visitors = [newVisitor(app.url), newVisitor(app.url)];
     for (const [i, v] of visitors.entries()) {
-      await v.post(10 + i, "plant");
+      await v.post(10 + i, "plant", { type: plantFor(10 + i) });
       await v.post(10 + i, "water");
       await v.post(10 + i, "compost");
     }

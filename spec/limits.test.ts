@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { publicId } from "../src/identity.ts";
-import { type PrivateApp, newVisitor, readPlots, sleep, startApp } from "./support.ts";
+import { newVisitor, plantFor, readPlots, sleep, startApp, type PrivateApp } from "./support.ts";
 
 // How often one gardener may act on a plot: a budget in a window of time, checked
 // on the server and counted per person. A private server with a small budget and a
@@ -18,7 +18,7 @@ afterAll(async () => {
 
 const statuses = async (visitor: ReturnType<typeof newVisitor>, plots: number[]) => {
   const out: number[] = [];
-  for (const plot of plots) out.push((await visitor.post(plot, "plant")).status);
+  for (const plot of plots) out.push((await visitor.post(plot, "plant", { type: plantFor(plot) })).status);
   return out;
 };
 
@@ -35,7 +35,7 @@ describe("the limit on plot actions", () => {
   it("says why, in words a person can read", async () => {
     const alice = newVisitor(app.url);
     await statuses(alice, [10, 11, 12, 13, 14]);
-    const refused = await alice.post(15, "plant");
+    const refused = await alice.post(15, "plant", { type: plantFor(15) });
     expect(refused.status).toBe(429);
     expect((refused.body as unknown as { error: string }).error).toMatch(/slow down/i);
   });
@@ -56,33 +56,33 @@ describe("the limit on plot actions", () => {
 
   it("counts refused attempts too, so hammering a plot you can't act on is stopped", async () => {
     const alice = newVisitor(app.url);
-    await alice.post(20, "plant");
-    for (let i = 0; i < 4; i++) expect((await alice.post(20, "plant")).status).toBe(409);
+    await alice.post(20, "plant", { type: plantFor(20) });
+    for (let i = 0; i < 4; i++) expect((await alice.post(20, "plant", { type: plantFor(20) })).status).toBe(409);
     // Five attempts so far, all counted: the sixth is turned away, not refused as a conflict.
-    expect((await alice.post(20, "plant")).status).toBe(429);
+    expect((await alice.post(20, "plant", { type: plantFor(20) })).status).toBe(429);
   });
 
   it("lets a person act again once the window has passed", { timeout: 15_000 }, async () => {
     const alice = newVisitor(app.url);
     await statuses(alice, [5, 6, 7, 8, 9]);
-    expect((await alice.post(24, "plant")).status).toBe(429);
+    expect((await alice.post(24, "plant", { type: plantFor(24) })).status).toBe(429);
 
     await sleep(WINDOW_MS + 300);
-    expect((await alice.post(24, "plant")).status).toBe(200);
+    expect((await alice.post(24, "plant", { type: plantFor(24) })).status).toBe(200);
   });
 
   it("is each person's own: one person's flood never stops another", async () => {
     const flooder = newVisitor(app.url);
     const other = newVisitor(app.url);
     await statuses(flooder, [0, 1, 2, 3, 4, 22, 23]);
-    expect((await flooder.post(21, "plant")).status).toBe(429);
+    expect((await flooder.post(21, "plant", { type: plantFor(21) })).status).toBe(429);
 
-    expect((await other.post(70, "plant")).status).toBe(200);
+    expect((await other.post(70, "plant", { type: plantFor(70) })).status).toBe(200);
   });
 
   it("covers water and compost as well as plant", async () => {
     const alice = newVisitor(app.url);
-    await alice.post(50, "plant");
+    await alice.post(50, "plant", { type: plantFor(50) });
     for (let i = 0; i < 4; i++) await alice.post(50, "water");
     expect((await alice.post(50, "water")).status).toBe(429);
     expect((await alice.post(50, "compost")).status).toBe(429);

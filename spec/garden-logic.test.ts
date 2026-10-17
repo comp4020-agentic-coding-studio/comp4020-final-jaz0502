@@ -5,14 +5,15 @@ import { expect, it } from "vitest";
 // by waiting. The module reads its durations from the environment when it is
 // loaded, so set them first: a tree sprouts at 1s, grows at 5s and is mature at
 // 10s; a flower takes half as long, a sunflower seven tenths, a flower shrub three quarters, a tomato nine tenths , a
-// lettuce two fifths, a strawberry half and a blueberry four fifths.
+// lettuce two fifths, a strawberry half, a blueberry four fifths, a lavender
+// three fifths, a rosemary four fifths and a foxglove seven tenths.
 process.env.SEED_TO_SPROUT_MS = "1000";
 process.env.SPROUT_TO_GROWING_MS = "4000";
 process.env.GROWING_TO_MATURE_MS = "5000";
 process.env.WILT_WINDOW_MS = "20000";
 const { derivePlot } = await import("../src/garden.ts");
 
-type PlantType = "tree" | "flower" | "sunflower" | "shrub" | "vegetable" | "tomato" | "lettuce" | "strawberry" | "blueberry";
+type PlantType = "tree" | "flower" | "sunflower" | "shrub" | "vegetable" | "tomato" | "lettuce" | "strawberry" | "blueberry" | "lavender" | "rosemary" | "foxglove";
 
 const stageAt = (plantType: PlantType, age: number): string =>
   derivePlot(
@@ -80,13 +81,27 @@ it("grows a strawberry in half the time and a blueberry in four fifths", () => {
   expect(stageAt("blueberry", 8000)).toBe("mature");
 });
 
+it("grows lavender, rosemary and foxglove at their own paces", () => {
+  expect(stageAt("lavender", 599)).toBe("planted");
+  expect(stageAt("lavender", 600)).toBe("sprout");
+  expect(stageAt("lavender", 6000)).toBe("mature");
+
+  expect(stageAt("rosemary", 799)).toBe("planted");
+  expect(stageAt("rosemary", 800)).toBe("sprout");
+  expect(stageAt("rosemary", 8000)).toBe("mature");
+
+  expect(stageAt("foxglove", 699)).toBe("planted");
+  expect(stageAt("foxglove", 700)).toBe("sprout");
+  expect(stageAt("foxglove", 7000)).toBe("mature");
+});
+
 it("has a flower ahead of a tree planted at the same moment", () => {
   expect(stageAt("flower", 5000)).toBe("mature");
   expect(stageAt("tree", 5000)).toBe("growing");
 });
 
 it("wilts every type after the same time without water", () => {
-  for (const type of ["tree", "flower", "sunflower", "shrub", "vegetable", "tomato", "lettuce", "strawberry", "blueberry"] as const) {
+  for (const type of ["tree", "flower", "sunflower", "shrub", "vegetable", "tomato", "lettuce", "strawberry", "blueberry", "lavender", "rosemary", "foxglove"] as const) {
     expect(stageAt(type, 20000)).not.toBe("wilted");
     expect(stageAt(type, 20001)).toBe("wilted");
   }

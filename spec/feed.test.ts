@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { publicId } from "../src/identity.ts";
-import { type PrivateApp, type Stream, newVisitor, openStream, postWave, sleep, startApp } from "./support.ts";
+import { newVisitor, openStream, plantFor, postWave, sleep, startApp, type PrivateApp, type Stream } from "./support.ts";
 
 // A short list of what gardeners have just done. It is a glance at what just
 // happened, not a history or a tally. Each test uses its own private copy of the
@@ -37,12 +37,12 @@ describe("the recent feed", () => {
     const alice = newVisitor(app.url);
     const bobStream = await join(newVisitor(app.url).gid);
 
-    await alice.post(4, "plant", { type: "flower" });
+    await alice.post(4, "plant", { type: "lavender" });
     await alice.post(4, "water");
 
     await bobStream.waitFor((f) => f.event === "activity" && (f.data as Entry).did === "water");
     expect(activities(bobStream)).toEqual([
-      { id: publicId(alice.gid), did: "plant", plot: 4, type: "flower" },
+      { id: publicId(alice.gid), did: "plant", plot: 4, type: "lavender" },
       { id: publicId(alice.gid), did: "water", plot: 4 },
     ]);
   });
@@ -51,7 +51,7 @@ describe("the recent feed", () => {
     const alice = newVisitor(app.url);
     const bobStream = await join(newVisitor(app.url).gid);
 
-    await alice.post(6, "plant");
+    await alice.post(6, "plant", { type: plantFor(6) });
     await sleep(1800);
     expect((await alice.post(6, "compost")).status).toBe(200);
 
@@ -61,7 +61,7 @@ describe("the recent feed", () => {
 
   it("gives a newcomer only the few most recent, newest first", async () => {
     const alice = newVisitor(app.url);
-    for (let plot = 0; plot < 10; plot++) await alice.post(plot, "plant");
+    for (let plot = 0; plot < 10; plot++) await alice.post(plot, "plant", { type: plantFor(plot) });
 
     const late = await join(newVisitor(app.url).gid);
     const feed = late.frames.find((f) => f.event === "feed")!.data as Entry[];
@@ -72,8 +72,8 @@ describe("the recent feed", () => {
     const alice = newVisitor(app.url);
     const stream = await join(alice.gid);
 
-    await alice.post(1, "plant");
-    await alice.post(1, "plant"); // already taken
+    await alice.post(1, "plant", { type: plantFor(1) });
+    await alice.post(1, "plant", { type: plantFor(1) }); // already taken
     await alice.post(2, "water"); // nothing there
     expect(await postWave(app.url, alice.gid)).toBe(204);
     await sleep(300);
@@ -86,7 +86,7 @@ describe("the recent feed", () => {
     const bob = newVisitor(app.url);
     const stream = await join(bob.gid);
 
-    await alice.post(0, "plant");
+    await alice.post(0, "plant", { type: plantFor(0) });
     await alice.post(0, "water");
     await sleep(300);
     const late = await join(newVisitor(app.url).gid);

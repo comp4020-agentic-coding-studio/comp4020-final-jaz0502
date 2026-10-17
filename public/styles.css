@@ -166,6 +166,18 @@ body {
   background: #4b5fc4;
 }
 
+.chip-lavender {
+  background: #a98ae0;
+}
+
+.chip-rosemary {
+  background: #3e7a4e;
+}
+
+.chip-foxglove {
+  background: #d96aa8;
+}
+
 .chip-lettuce {
   background: #8fd14f;
 }

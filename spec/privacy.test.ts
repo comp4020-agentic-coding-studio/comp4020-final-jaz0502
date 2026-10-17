@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, inject, it } from "vitest";
 import { publicId } from "../src/identity.ts";
+import { plantFor } from "./support.ts";
 
 // The gid cookie is a visitor's whole identity, so it must never be sent to
 // anyone else: clients only ever see a one-way public id. These run against the
@@ -52,14 +53,15 @@ interface Plot {
 // so rather than assume a free plot: plant the first empty one, and if the
 // garden is full, water one that's growing.
 async function tendAPlot(gid: string, snapshot: Plot[], raw: { body: string }): Promise<number> {
-  const post = (position: number, action: string) =>
+  const post = (position: number, action: string, body?: unknown) =>
     fetch(new URL(`/api/plots/${position}/${action}`, baseUrl), {
       method: "POST",
-      headers: { cookie: `gid=${gid}` },
+      headers: { cookie: `gid=${gid}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
 
   for (const plot of snapshot.filter((p) => p.state === "empty")) {
-    const res = await post(plot.position, "plant");
+    const res = await post(plot.position, "plant", { type: plantFor(plot.position) });
     if (res.ok) {
       raw.body = await res.text();
       return plot.position;

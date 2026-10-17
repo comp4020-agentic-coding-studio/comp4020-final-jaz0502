@@ -4,7 +4,7 @@ import { join as joinPath } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { publicId } from "../src/identity.ts";
-import { type PrivateApp, type SseFrame, type Stream, newVisitor, openStream, sleep, startApp } from "./support.ts";
+import { newVisitor, openStream, plantFor, sleep, startApp, type PrivateApp, type SseFrame, type Stream } from "./support.ts";
 
 // A gardener's own record of what they have planted, watered and composted. It
 // is a record, not a score: it goes to that gardener and nobody else, and is never
@@ -51,18 +51,18 @@ describe("a gardener's record", () => {
     const stream = await join(app, alice.gid);
     expect(statsFrames(stream)[0]).toEqual({ planted: 0, watered: 0, composted: 0, since: null });
 
-    await alice.post(0, "plant");
-    await alice.post(1, "plant");
+    await alice.post(0, "plant", { type: plantFor(0) });
+    await alice.post(1, "plant", { type: plantFor(1) });
     await alice.post(1, "water");
     await stream.waitFor(hasCounts(2, 1, 0));
 
     // A refused action counts for nothing.
-    expect((await alice.post(0, "plant")).status).toBe(409);
+    expect((await alice.post(0, "plant", { type: plantFor(0) })).status).toBe(409);
     await sleep(200);
     expect(statsFrames(stream).at(-1)).toMatchObject({ planted: 2, watered: 1, composted: 0 });
 
     // Composting needs a plot that has wilted.
-    await alice.post(2, "plant");
+    await alice.post(2, "plant", { type: plantFor(2) });
     await sleep(1800);
     expect((await alice.post(2, "compost")).status).toBe(200);
     const last = await stream.waitFor(hasCounts(3, 1, 1));
@@ -71,7 +71,7 @@ describe("a gardener's record", () => {
 
   it("has it ready the next time they connect", async () => {
     const alice = newVisitor(app.url);
-    await alice.post(5, "plant");
+    await alice.post(5, "plant", { type: plantFor(5) });
     await alice.post(5, "water");
 
     const later = await join(app, alice.gid);
@@ -82,7 +82,7 @@ describe("a gardener's record", () => {
     const alice = newVisitor(app.url);
     const bobStream = await join(app, newVisitor(app.url).gid);
 
-    await alice.post(8, "plant");
+    await alice.post(8, "plant", { type: plantFor(8) });
     await alice.post(8, "water");
     await sleep(400);
 
@@ -104,9 +104,9 @@ describe("keeping it", () => {
     const file = joinPath(dir, "garden.db");
     const first = await startApp({ DB_PATH: file });
     const alice = newVisitor(first.url);
-    await alice.post(0, "plant");
+    await alice.post(0, "plant", { type: plantFor(0) });
     await alice.post(0, "water");
-    await alice.post(1, "plant");
+    await alice.post(1, "plant", { type: plantFor(1) });
     const before = await join(first, alice.gid);
     await before.waitFor(hasCounts(2, 1, 0));
 
@@ -134,9 +134,9 @@ describe("a limit on how many gardeners are counted", () => {
       const [a, b, c] = [newVisitor(app.url), newVisitor(app.url), newVisitor(app.url)];
       const streams = [await join(app, a.gid), await join(app, b.gid), await join(app, c.gid)];
 
-      await a.post(0, "plant");
-      await b.post(1, "plant");
-      await c.post(2, "plant");
+      await a.post(0, "plant", { type: plantFor(0) });
+      await b.post(1, "plant", { type: plantFor(1) });
+      await c.post(2, "plant", { type: plantFor(2) });
       await streams[0].waitFor(hasCounts(1, 0, 0));
       await streams[1].waitFor(hasCounts(1, 0, 0));
 

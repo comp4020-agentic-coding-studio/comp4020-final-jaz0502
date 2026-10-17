@@ -4,8 +4,9 @@ import { type PrivateApp, newVisitor, openStream, readPlots, sleep, startApp } f
 
 // Each bed takes only what it is for. The server decides, so a request sent by hand
 // gets the same answer as a click in the page. Only planting is restricted: anyone
-// may water or compost in any bed. Plots 25 to 49 are The Flower Garden, 50 to 74 The
-// Fruit Garden and 75 to 99 The Vegetable Garden.
+// may water or compost in any bed. Plots 0 to 24 are The Cottage Garden, 25 to 49 The
+// Flower Garden, 50 to 74 The Fruit Garden and 75 to 99 The Vegetable Garden.
+const COTTAGE_GARDEN = [0, 24];
 const FLOWER_GARDEN = [25, 49];
 const FRUIT_GARDEN = [50, 74];
 const VEGETABLE_GARDEN = [75, 99];
@@ -46,8 +47,9 @@ describe("The Flower Garden", () => {
     const alice = newVisitor(app.url);
     expect((await alice.post(FLOWER_GARDEN[0], "plant", { type: "tree" })).status).toBe(409);
     expect((await alice.post(FLOWER_GARDEN[1], "plant", { type: "tree" })).status).toBe(409);
-    // The plots either side are in beds that take anything.
-    expect((await alice.post(FLOWER_GARDEN[0] - 1, "plant", { type: "tree" })).status).toBe(200);
+    // The plot just before it is The Cottage Garden's last, which takes lavender, not a tree, and the
+    // plot just past it is The Fruit Garden's first, which takes a tree.
+    expect((await alice.post(FLOWER_GARDEN[0] - 1, "plant", { type: "tree" })).status).toBe(409);
     expect((await alice.post(FLOWER_GARDEN[1] + 1, "plant", { type: "tree" })).status).toBe(200);
   });
 
@@ -128,18 +130,29 @@ describe("The Vegetable Garden", () => {
   });
 });
 
-describe("The Cottage Garden, the bed that takes anything", () => {
-  it("takes every plant: an apple tree, a flower, a sunflower, a flower shrub, a carrot, a tomato, a lettuce, a strawberry and a blueberry", async () => {
+describe("The Cottage Garden", () => {
+  it("takes lavender, rosemary and foxglove, and nothing else", async () => {
     const alice = newVisitor(app.url);
-    expect((await alice.post(10, "plant", { type: "tree" })).status).toBe(200);
-    expect((await alice.post(11, "plant", { type: "flower" })).status).toBe(200);
-    expect((await alice.post(12, "plant", { type: "shrub" })).status).toBe(200);
-    expect((await alice.post(13, "plant", { type: "vegetable" })).status).toBe(200);
-    expect((await alice.post(14, "plant", { type: "sunflower" })).status).toBe(200);
-    expect((await alice.post(15, "plant", { type: "tomato" })).status).toBe(200);
-    expect((await alice.post(16, "plant", { type: "lettuce" })).status).toBe(200);
-    expect((await alice.post(17, "plant", { type: "strawberry" })).status).toBe(200);
-    expect((await alice.post(18, "plant", { type: "blueberry" })).status).toBe(200);
+    expect((await alice.post(COTTAGE_GARDEN[0], "plant", { type: "lavender" })).status).toBe(200);
+    expect((await alice.post(1, "plant", { type: "rosemary" })).status).toBe(200);
+    expect((await alice.post(COTTAGE_GARDEN[1], "plant", { type: "foxglove" })).status).toBe(200);
+    expect(await plotAt(1)).toMatchObject({ plantType: "rosemary" });
+
+    for (const type of ["tree", "flower", "sunflower", "shrub", "vegetable", "tomato", "lettuce", "strawberry", "blueberry"]) {
+      const refused = await alice.post(5, "plant", { type });
+      expect(refused.status).toBe(409);
+      expect((refused.body as unknown as { error: string }).error).toMatch(/Cottage Garden only takes lavender, rosemary and foxglove/);
+    }
+    // Leaving the type out plants a tree, which is turned away.
+    expect((await alice.post(6, "plant")).status).toBe(409);
+    expect((await plotAt(5)).state).toBe("empty");
+  });
+
+  it("lets anyone water there, and keeps a plant already planted before it had a theme", async () => {
+    const alice = newVisitor(app.url);
+    const bob = newVisitor(app.url);
+    await alice.post(7, "plant", { type: "lavender" });
+    expect((await bob.post(7, "water")).status).toBe(200);
   });
 });
 
@@ -173,11 +186,12 @@ describe("what the page is told", () => {
         beds: { name: string; takes: string[] | null }[];
       };
       expect(hello.beds).toHaveLength(4);
-      expect(hello.beds[0]).toEqual({ name: "The Cottage Garden", takes: null });
+      expect(hello.beds[0]).toEqual({ name: "The Cottage Garden", takes: ["lavender", "rosemary", "foxglove"] });
       expect(hello.beds[1]).toEqual({ name: "The Flower Garden", takes: ["flower", "sunflower", "shrub"] });
       expect(hello.beds[2]).toEqual({ name: "The Fruit Garden", takes: ["tree", "strawberry", "blueberry"] });
       expect(hello.beds[3]).toEqual({ name: "The Vegetable Garden", takes: ["vegetable", "tomato", "lettuce"] });
-      expect(hello.beds.filter((b) => b.takes === null)).toHaveLength(1);
+      // Every bed has a theme: none takes just anything.
+      expect(hello.beds.filter((b) => b.takes === null)).toHaveLength(0);
     } finally {
       stream.close();
     }
