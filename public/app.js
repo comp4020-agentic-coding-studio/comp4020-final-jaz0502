@@ -758,17 +758,19 @@ scene.add(skyLight);
 let dayLengthMs = 30 * 60_000;
 
 // Phase 0 is midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset. Between keys,
-// everything is blended.
+// everything is blended. `sky` is the colour at the horizon, which the fog and the
+// clouds also use; `mid` and `top` are the colours higher up, and `glow` is how
+// much the sky shines round the sun.
 const SKY_KEYS = [
-  { at: 0.0, sky: 0x0b1530, ambient: 0x7d8ad8, ambientI: 0.6, light: 0xa9bcff, lightI: 0.45, stars: 1 },
-  { at: 0.19, sky: 0x0b1530, ambient: 0x7d8ad8, ambientI: 0.6, light: 0xa9bcff, lightI: 0.45, stars: 1 },
-  { at: 0.26, sky: 0xf2a37c, ambient: 0xffd2b0, ambientI: 0.5, light: 0xffb27a, lightI: 0.6, stars: 0 },
-  { at: 0.34, sky: 0xbfe3f0, ambient: 0xffffff, ambientI: 0.7, light: 0xfff4e0, lightI: 0.8, stars: 0 },
-  { at: 0.66, sky: 0xbfe3f0, ambient: 0xffffff, ambientI: 0.7, light: 0xfff4e0, lightI: 0.8, stars: 0 },
-  { at: 0.74, sky: 0xf08a5d, ambient: 0xffc39a, ambientI: 0.5, light: 0xff9a5a, lightI: 0.6, stars: 0 },
-  { at: 0.8, sky: 0x3a2f5c, ambient: 0x8a7bd1, ambientI: 0.42, light: 0xb39cff, lightI: 0.35, stars: 0.5 },
-  { at: 0.86, sky: 0x0b1530, ambient: 0x7d8ad8, ambientI: 0.6, light: 0xa9bcff, lightI: 0.45, stars: 1 },
-  { at: 1.0, sky: 0x0b1530, ambient: 0x7d8ad8, ambientI: 0.6, light: 0xa9bcff, lightI: 0.45, stars: 1 },
+  { at: 0.0, top: 0x03081c, mid: 0x0a1534, sky: 0x16244c, glow: 0, ambient: 0x7d8ad8, ambientI: 0.6, light: 0xa9bcff, lightI: 0.45, stars: 1 },
+  { at: 0.19, top: 0x03081c, mid: 0x0a1534, sky: 0x16244c, glow: 0, ambient: 0x7d8ad8, ambientI: 0.6, light: 0xa9bcff, lightI: 0.45, stars: 1 },
+  { at: 0.26, top: 0x3a5594, mid: 0xd98aa0, sky: 0xffb27a, glow: 1, ambient: 0xffd2b0, ambientI: 0.5, light: 0xffb27a, lightI: 0.6, stars: 0 },
+  { at: 0.34, top: 0x4d9be0, mid: 0x9ccdee, sky: 0xd4eef6, glow: 0.12, ambient: 0xffffff, ambientI: 0.7, light: 0xfff4e0, lightI: 0.8, stars: 0 },
+  { at: 0.66, top: 0x4d9be0, mid: 0x9ccdee, sky: 0xd4eef6, glow: 0.12, ambient: 0xffffff, ambientI: 0.7, light: 0xfff4e0, lightI: 0.8, stars: 0 },
+  { at: 0.74, top: 0x35508f, mid: 0xd9708a, sky: 0xf59a52, glow: 1, ambient: 0xffc39a, ambientI: 0.5, light: 0xff9a5a, lightI: 0.6, stars: 0 },
+  { at: 0.8, top: 0x151a44, mid: 0x4a3a7c, sky: 0xa8588a, glow: 0.45, ambient: 0x8a7bd1, ambientI: 0.42, light: 0xb39cff, lightI: 0.35, stars: 0.5 },
+  { at: 0.86, top: 0x03081c, mid: 0x0a1534, sky: 0x16244c, glow: 0, ambient: 0x7d8ad8, ambientI: 0.6, light: 0xa9bcff, lightI: 0.45, stars: 1 },
+  { at: 1.0, top: 0x03081c, mid: 0x0a1534, sky: 0x16244c, glow: 0, ambient: 0x7d8ad8, ambientI: 0.6, light: 0xa9bcff, lightI: 0.45, stars: 1 },
 ];
 
 const SKY_DISTANCE = 25;
@@ -776,11 +778,105 @@ const SKY_DISTANCE = 25;
 // Grass all round the bed, wide enough to reach the horizon. Fog in the sky's
 // colour fades its far edge into the sky, so there's no visible rim.
 const GROUND_Y = -0.46;
-const ground = new THREE.Mesh(new THREE.CircleGeometry(80, 48), flatMaterial(0x7fae5a));
+// A lawn texture: a base green with soft patches of lighter and darker green and a
+// speckle of blades, tiled across the ground, so it does not read as one flat colour.
+function lawnTexture() {
+  const size = 512;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#78a854";
+  ctx.fillRect(0, 0, size, size);
+  const patch = (x, y, radius, colour) => {
+    // Drawn again shifted by a full tile in each direction, so it wraps without a seam.
+    for (const dx of [-size, 0, size]) {
+      for (const dy of [-size, 0, size]) {
+        const gradient = ctx.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, radius);
+        gradient.addColorStop(0, colour);
+        gradient.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = gradient;
+        ctx.fillRect(x + dx - radius, y + dy - radius, radius * 2, radius * 2);
+      }
+    }
+  };
+  for (let i = 0; i < 30; i++) {
+    const light = seeded(i * 3 + 1) > 0.5;
+    patch(seeded(i * 7 + 2) * size, seeded(i * 11 + 3) * size, 120 + seeded(i * 13 + 4) * 140, light ? "rgba(128,176,86,0.13)" : "rgba(104,152,76,0.13)");
+  }
+  for (let i = 0; i < 1500; i++) {
+    const x = seeded(i * 5 + 7) * size;
+    const y = seeded(i * 9 + 8) * size;
+    const light = seeded(i * 17 + 9) > 0.45;
+    ctx.fillStyle = light ? "rgba(132,180,90,0.12)" : "rgba(104,152,76,0.11)";
+    ctx.fillRect(x, y, 1.5, 2 + seeded(i * 19 + 10) * 2);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(26, 26);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
+  return texture;
+}
+const ground = new THREE.Mesh(
+  new THREE.CircleGeometry(80, 48),
+  new THREE.MeshStandardMaterial({ map: lawnTexture(), roughness: 1, metalness: 0 }),
+);
 ground.rotation.x = -Math.PI / 2;
 ground.position.y = GROUND_Y;
 scene.add(ground);
-scene.fog = new THREE.Fog(0xbfe3f0, 22, 60);
+scene.fog = new THREE.Fog(0xd4eef6, 22, 60);
+
+// The sky: a big dome round the camera, painted from the horizon colour up through a
+// middle band to the top, with a warm glow near the sun, instead of one flat colour.
+// The fog takes the horizon colour, so the far grass melts into the sky.
+const skyUniforms = {
+  topColour: { value: new THREE.Color(0x4d9be0) },
+  midColour: { value: new THREE.Color(0x9ccdee) },
+  horizonColour: { value: new THREE.Color(0xd4eef6) },
+  glowColour: { value: new THREE.Color(0xffa860) },
+  sunDirection: { value: new THREE.Vector3(0, 0, -1) },
+  glow: { value: 0 },
+};
+const skyDome = new THREE.Mesh(
+  new THREE.SphereGeometry(100, 32, 16),
+  new THREE.ShaderMaterial({
+    uniforms: skyUniforms,
+    side: THREE.BackSide,
+    depthWrite: false,
+    fog: false,
+    vertexShader: `
+      varying vec3 vDirection;
+      void main() {
+        vDirection = normalize(position);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: `
+      uniform vec3 topColour;
+      uniform vec3 midColour;
+      uniform vec3 horizonColour;
+      uniform vec3 glowColour;
+      uniform vec3 sunDirection;
+      uniform float glow;
+      varying vec3 vDirection;
+      void main() {
+        vec3 direction = normalize(vDirection);
+        // The camera sees only a thin strip of sky above the horizon, so the
+        // colours change over a small range of height.
+        float height = max(direction.y, 0.0);
+        vec3 colour = mix(horizonColour, midColour, smoothstep(0.0, 0.09, height));
+        colour = mix(colour, topColour, smoothstep(0.05, 0.42, height));
+        float towardSun = max(dot(direction, normalize(sunDirection)), 0.0);
+        float shine = pow(towardSun, 5.0) * 0.5 + pow(towardSun, 36.0) * 0.9;
+        colour += glowColour * shine * glow * (1.0 - smoothstep(0.0, 0.45, height));
+        gl_FragColor = vec4(colour, 1.0);
+        #include <colorspace_fragment>
+      }`,
+  }),
+);
+skyDome.renderOrder = -1000;
+skyDome.frustumCulled = false;
+scene.add(skyDome);
+scene.background = null;
 
 // The sun and moon rise from the horizon on the left, pass low behind the bed
 // where the camera can see them, and set behind the ground on the right.
@@ -964,8 +1060,12 @@ function updateSky() {
   const to = SKY_KEYS[i + 1];
   const t = (phase - from.at) / (to.at - from.at);
 
-  scene.background = blendColour(skyColour, from.sky, to.sky, t);
+  blendColour(skyColour, from.sky, to.sky, t);
   scene.fog.color.copy(skyColour);
+  skyUniforms.horizonColour.value.copy(skyColour);
+  blendColour(skyUniforms.midColour.value, from.mid, to.mid, t);
+  blendColour(skyUniforms.topColour.value, from.top, to.top, t);
+  skyUniforms.glow.value = from.glow + (to.glow - from.glow) * t;
   ambient.color.copy(blendColour(ambientColour, from.ambient, to.ambient, t));
   ambient.intensity = from.ambientI + (to.ambientI - from.ambientI) * t;
   stars.material.opacity = from.stars + (to.stars - from.stars) * t;
@@ -979,6 +1079,9 @@ function updateSky() {
   dayness = phase >= 0.25 && phase < 0.75 ? Math.min(Math.max(Math.sin(sunAngle) / 0.35, 0), 1) : 0;
   placeOnArc(sunDisc, sunAngle);
   placeOnArc(moonDisc, moonAngle);
+  // The dome stays centred on the camera, and its glow sits where the sun is.
+  skyDome.position.copy(camera.position);
+  skyUniforms.sunDirection.value.copy(sunDisc.position).sub(camera.position).normalize();
 
   // The light follows whichever body is up, and fades to nothing at the
   // horizon so the swap between sun and moon doesn't make the shadows jump.
