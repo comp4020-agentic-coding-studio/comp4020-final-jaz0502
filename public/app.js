@@ -2800,6 +2800,159 @@ renderer.domElement.addEventListener("pointerleave", () => {
   clearStatusBarHover();
 });
 
+// Cows: a few wander the open grass beyond the garden, for show only. Each has a
+// patch of lawn of its own, so they never meet or come near the beds, fences or
+// paths. Where a cow is, which way it faces and whether its head is down are a pure
+// function of the server's clock, so every visitor sees the cows in the same places
+// with nothing sent over the wire. They cannot be clicked and nothing depends on them.
+const COW_COUNT = 5;
+const COW_SEGMENT_S = 30; // how long one walk-then-graze cycle lasts
+const COW_COLOURS = {
+  white: 0xf2efe6,
+  black: 0x2a2724,
+  brown: 0x8a5a36,
+  pink: 0xe8b4a8,
+  horn: 0xe6dcc0,
+  hoof: 0x3a3330,
+};
+const cowMaterials = Object.fromEntries(Object.entries(COW_COLOURS).map(([name, colour]) => [name, flatMaterial(colour)]));
+
+// A rounded lump: a low-poly ellipsoid, the same way the tree crowns are made.
+const cowBlobGeometry = new THREE.SphereGeometry(1, 8, 6);
+const cowBlob = (rx, ry, rz, material, x = 0, y = 0, z = 0) => {
+  const mesh = new THREE.Mesh(cowBlobGeometry, material);
+  mesh.scale.set(rx, ry, rz);
+  mesh.position.set(x, y, z);
+  return mesh;
+};
+
+// One cow faces +x. Its legs, neck and tail hang from pivots so they can swing and
+// nod. The spots are flattened lumps that poke out of the body, never faces lying
+// on the same plane as the body, so they cannot flicker against it.
+function buildCow(index) {
+  const brown = index === 1 || index === 4;
+  const coat = brown ? cowMaterials.brown : cowMaterials.white;
+  const patch = brown ? cowMaterials.white : cowMaterials.black;
+  const group = new THREE.Group();
+
+  const body = new THREE.Group();
+  body.position.y = 0.7;
+  body.add(cowBlob(0.7, 0.36, 0.33, coat));
+  body.add(cowBlob(0.38, 0.38, 0.34, coat, 0.36, 0.02, 0)); // chest
+  body.add(cowBlob(0.36, 0.37, 0.34, coat, -0.4, 0.02, 0)); // hindquarters
+  body.add(cowBlob(0.22, 0.12, 0.2, coat, 0.45, 0.34, 0)); // shoulder hump
+  body.add(cowBlob(0.2, 0.12, 0.22, cowMaterials.pink, -0.38, -0.32, 0)); // udder
+  for (const side of [1, -1]) {
+    // A few spots on each flank, a different set for every cow.
+    for (let k = 0; k < 3; k++) {
+      const r = (n) => seeded(index * 31 + k * 7 + (side > 0 ? 0 : 50) + n);
+      body.add(
+        cowBlob(0.1 + r(1) * 0.14, 0.09 + r(2) * 0.12, 0.07, patch, -0.55 + k * 0.5 + (r(3) - 0.5) * 0.18, (r(4) - 0.35) * 0.28, side * (0.3 - r(5) * 0.02)),
+      );
+    }
+  }
+  group.add(body);
+
+  const legs = [];
+  for (const [x, z] of [[0.46, 0.2], [0.46, -0.2], [-0.46, 0.2], [-0.46, -0.2]]) {
+    const pivot = new THREE.Group();
+    pivot.position.set(x, 0.5, z);
+    pivot.add(cowBlob(0.1, 0.17, 0.1, coat, 0, -0.1, 0)); // thigh
+    pivot.add(cowBlob(0.065, 0.16, 0.065, coat, 0, -0.3, 0)); // shin
+    pivot.add(cowBlob(0.08, 0.05, 0.08, cowMaterials.hoof, 0, -0.47, 0.005)); // hoof
+    group.add(pivot);
+    legs.push(pivot);
+  }
+
+  // The neck and head swing together from the top of the chest.
+  const head = new THREE.Group();
+  head.position.set(0.62, 0.9, 0);
+  head.add(cowBlob(0.26, 0.17, 0.17, coat, 0.16, -0.02, 0)); // neck
+  head.add(cowBlob(0.17, 0.15, 0.15, coat, 0.38, -0.04, 0)); // skull
+  head.add(cowBlob(0.11, 0.1, 0.12, cowMaterials.pink, 0.55, -0.1, 0)); // muzzle
+  head.add(cowBlob(0.025, 0.03, 0.03, cowMaterials.black, 0.62, -0.08, 0.05)); // nostrils
+  head.add(cowBlob(0.025, 0.03, 0.03, cowMaterials.black, 0.62, -0.08, -0.05));
+  head.add(cowBlob(0.025, 0.03, 0.03, cowMaterials.black, 0.45, 0.02, 0.135)); // eyes
+  head.add(cowBlob(0.025, 0.03, 0.03, cowMaterials.black, 0.45, 0.02, -0.135));
+  if (brown) head.add(cowBlob(0.1, 0.1, 0.07, cowMaterials.white, 0.46, -0.03, 0)); // blaze down the face
+  else head.add(cowBlob(0.1, 0.07, 0.17, patch, 0.33, 0.06, 0)); // dark cap
+  for (const side of [1, -1]) {
+    const ear = cowBlob(0.05, 0.03, 0.1, brown ? cowMaterials.brown : cowMaterials.black, 0.27, 0.07, side * 0.22);
+    ear.rotation.x = side * -0.4;
+    head.add(ear);
+    head.add(cowBlob(0.025, 0.07, 0.025, cowMaterials.horn, 0.3, 0.17, side * 0.1));
+  }
+  group.add(head);
+
+  const tail = new THREE.Group();
+  tail.position.set(-0.74, 0.88, 0);
+  tail.add(cowBlob(0.025, 0.24, 0.025, coat, 0, -0.22, 0));
+  tail.add(cowBlob(0.045, 0.09, 0.045, patch, 0, -0.5, 0));
+  group.add(tail);
+
+  group.scale.setScalar(1.15);
+  return { group, legs, head, tail };
+}
+
+// Each cow keeps to its own slice of the lawn, a ring round the garden.
+const cows = Array.from({ length: COW_COUNT }, (_, i) => {
+  const cow = buildCow(i);
+  const angle = ((i + 0.3 * seeded(i + 5)) / COW_COUNT) * Math.PI * 2 + 0.4;
+  const radius = 21 + seeded(i * 3 + 1) * 5;
+  cow.home = {
+    x: GARDEN_CENTRE.x + Math.cos(angle) * radius,
+    z: GARDEN_CENTRE.z + Math.sin(angle) * radius,
+  };
+  cow.group.position.y = GROUND_Y;
+  scene.add(cow.group);
+  return cow;
+});
+
+// A spot within a few steps of the cow's home, a different one for each cycle.
+function cowSpot(cow, index, cycle) {
+  const a = seeded(index * 101 + cycle * 7.3) * Math.PI * 2;
+  const r = 1.2 + seeded(index * 57 + cycle * 3.1) * 2.6;
+  return { x: cow.home.x + Math.cos(a) * r, z: cow.home.z + Math.sin(a) * r };
+}
+
+const smooth = (t) => t * t * (3 - 2 * t);
+const clamp01 = (t) => Math.min(Math.max(t, 0), 1);
+
+function updateCows(timeSeconds) {
+  cows.forEach((cow, i) => {
+    const t = timeSeconds / COW_SEGMENT_S + i * 0.37;
+    const cycle = Math.floor(t);
+    const p = t - cycle;
+    const from = cowSpot(cow, i, cycle);
+    const to = cowSpot(cow, i, cycle + 1);
+    const headingTo = Math.atan2(-(to.z - from.z), to.x - from.x);
+    const before = cowSpot(cow, i, cycle - 1);
+    const headingFrom = Math.atan2(-(from.z - before.z), from.x - before.x);
+
+    // First turn to face the next spot, then walk to it, then graze until the next cycle.
+    const turn = smooth(clamp01(p / 0.12));
+    let delta = headingTo - headingFrom;
+    delta = Math.atan2(Math.sin(delta), Math.cos(delta));
+    const walk = smooth(clamp01((p - 0.12) / 0.38));
+    cow.group.rotation.y = headingFrom + delta * turn;
+    cow.group.position.x = from.x + (to.x - from.x) * walk;
+    cow.group.position.z = from.z + (to.z - from.z) * walk;
+
+    const walking = p > 0.12 && p < 0.5 ? Math.sin(((p - 0.12) / 0.38) * Math.PI) ** 0.5 : 0;
+    const stride = Math.sin(timeSeconds * 5 + i) * 0.45 * walking;
+    cow.legs[0].rotation.z = stride;
+    cow.legs[3].rotation.z = stride;
+    cow.legs[1].rotation.z = -stride;
+    cow.legs[2].rotation.z = -stride;
+
+    // Head up while walking, down to graze for most of the rest, up again before moving off.
+    const lower = smooth(clamp01((p - 0.5) / 0.08)) * (1 - smooth(clamp01((p - 0.9) / 0.08)));
+    const chew = Math.sin(timeSeconds * 2.4 + i * 2) * 0.06 * lower;
+    cow.head.rotation.z = 0.08 - 0.95 * lower + chew;
+    cow.tail.rotation.x = Math.sin(timeSeconds * 1.8 + i * 1.3) * 0.3;
+  });
+}
+
 function animate() {
   requestAnimationFrame(animate);
   const now = performance.now();
@@ -2811,6 +2964,7 @@ function animate() {
   updateSky();
   updateClouds(serverNow() / 1000);
   updateInsects(serverNow() / 1000);
+  updateCows(serverNow() / 1000);
   updateDrops(now);
   updateBadges(now);
   updateFigures(now);
