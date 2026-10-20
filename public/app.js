@@ -909,20 +909,23 @@ const sunDisc = skyDisc(4.4, 0xffe08a);
 const moonDisc = skyDisc(3.2, 0xe8eeff);
 scene.add(sunDisc, moonDisc);
 
-// Stars over the whole sky above the horizon.
+// Stars over the whole sky above the horizon. They sit on a sphere further out than the
+// hills and trees and move with the camera, so nothing on the ground is ever behind one.
+const STAR_RADIUS = 96;
 const starPositions = [];
 for (let i = 0; i < 500; i++) {
   const height = 0.03 + Math.random() * 0.97;
   const angle = Math.random() * Math.PI * 2;
   const across = Math.sqrt(1 - height * height);
-  starPositions.push(Math.cos(angle) * across * 40, height * 40, Math.sin(angle) * across * 40);
+  starPositions.push(Math.cos(angle) * across * STAR_RADIUS, height * STAR_RADIUS, Math.sin(angle) * across * STAR_RADIUS);
 }
 const starGeometry = new THREE.BufferGeometry();
 starGeometry.setAttribute("position", new THREE.Float32BufferAttribute(starPositions, 3));
 const stars = new THREE.Points(
   starGeometry,
-  new THREE.PointsMaterial({ color: 0xffffff, size: 0.35, transparent: true, opacity: 0, depthWrite: false, fog: false }),
+  new THREE.PointsMaterial({ color: 0xffffff, size: 0.8, transparent: true, opacity: 0, depthWrite: false, fog: false }),
 );
+stars.frustumCulled = false;
 scene.add(stars);
 
 // Clouds: soft, thin and wispy, on a wide ring round the garden, drifting
@@ -1081,6 +1084,7 @@ function updateSky() {
   placeOnArc(moonDisc, moonAngle);
   // The dome stays centred on the camera, and its glow sits where the sun is.
   skyDome.position.copy(camera.position);
+  stars.position.copy(camera.position);
   skyUniforms.sunDirection.value.copy(sunDisc.position).sub(camera.position).normalize();
 
   // The light follows whichever body is up, and fades to nothing at the
@@ -1312,23 +1316,82 @@ for (const [bed, kind] of Object.entries(FENCES)) {
 }
 
 
-// Earth showing in the gaps between the stones, so they read as set in the ground
-// rather than laid on the grass.
+// Earth showing in the gaps between the stones, so they read as set in the ground rather
+// than laid on the grass. Each bed has a patch of bare earth with a wobbly edge, a ring of
+// muddy grass round it where it melts into the lawn, and a ragged strip along each
+// walkway. The outer flagstones stop at the edge of the patch, so the path follows it.
 const earthMaterial = flatMaterial(0x8a7556);
-function earthSlab(x, z, width, depth) {
-  const slab = new THREE.Mesh(new THREE.BoxGeometry(width, 0.03, depth), earthMaterial);
-  slab.position.set(x, GROUND_Y + 0.015, z);
-  scene.add(slab);
+const fringeMaterial = flatMaterial(0x76703f);
+for (const [material, offset] of [[earthMaterial, -2], [fringeMaterial, -1]]) {
+  material.polygonOffset = true;
+  material.polygonOffsetFactor = offset;
+  material.polygonOffsetUnits = offset;
 }
-for (const centre of BED_CENTRES) {
-  for (const [x, z, width, depth] of [
-    [0, -3.7, 9.4, 2.0],
-    [0, 3.7, 9.4, 2.0],
-    [-3.7, 0, 2.0, 5.4],
-    [3.7, 0, 2.0, 5.4],
-  ]) {
-    earthSlab(centre.x + x, centre.z + z, width, depth);
+const EARTH_SIZE = 5.45;
+const EARTH_CORNER = 3.5; // lower is rounder
+const earthSeed = (bed) => bed * 3.1 + 0.7;
+
+// How far the edge of a bed's earth is from its middle, looking in direction theta: a
+// rounded square with a few slow waves round it. Never less than about 5.1, so the
+// stones along the straight parts always sit on earth.
+function earthRadius(bed, theta, grow = 0) {
+  const seed = earthSeed(bed);
+  const c = Math.abs(Math.cos(theta));
+  const sn = Math.abs(Math.sin(theta));
+  const square = EARTH_SIZE / Math.pow(Math.pow(c, EARTH_CORNER) + Math.pow(sn, EARTH_CORNER), 1 / EARTH_CORNER);
+  const wobble = 0.5 * Math.sin(2 * theta + seed) + 0.3 * Math.sin(3 * theta + seed * 2.1) + 0.2 * Math.sin(5 * theta + seed * 3.7);
+  return square + 0.36 * wobble + grow;
+}
+
+function earthPatch(bed, grow, material) {
+  const centre = BED_CENTRES[bed];
+  const outline = new THREE.Shape();
+  const points = 96;
+  for (let i = 0; i < points; i++) {
+    const theta = (i / points) * Math.PI * 2;
+    const r = earthRadius(bed, theta, grow + (grow > 0 ? 0.12 * Math.sin(theta * 9 + bed) : 0));
+    // Laying the shape flat sends its y to -z, so drawing at -sin puts the edge at +sin on the ground.
+    if (i === 0) outline.moveTo(Math.cos(theta) * r, -Math.sin(theta) * r);
+    else outline.lineTo(Math.cos(theta) * r, -Math.sin(theta) * r);
   }
+  outline.closePath();
+  const geometry = new THREE.ShapeGeometry(outline);
+  geometry.rotateX(-Math.PI / 2);
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.set(centre.x, GROUND_Y + (grow > 0 ? 0.012 : 0.02), centre.z);
+  scene.add(mesh);
+}
+BED_CENTRES.forEach((_, bed) => {
+  earthPatch(bed, 0.34, fringeMaterial);
+  earthPatch(bed, 0, earthMaterial);
+});
+
+// A ragged strip of earth down the length of a walkway, wider than the stones on it.
+for (const [kind, material, extra, height] of [["fringe", fringeMaterial, 0.3, 0.012], ["earth", earthMaterial, 0, 0.02]]) {
+  WALKWAYS.forEach((walkway, index) => {
+    const dx = walkway.to.x - walkway.from.x;
+    const dz = walkway.to.z - walkway.from.z;
+    const length = Math.hypot(dx, dz);
+    const nx = -dz / length;
+    const nz = dx / length;
+    const steps = Math.ceil(length * 2.5);
+    const positions = [];
+    const indices = [];
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const half = 1.38 + extra + 0.16 * Math.sin(i * 0.9 + index * 2) + 0.1 * Math.sin(i * 2.3 + index) + (kind === "fringe" ? 0.06 * Math.sin(i * 3.1) : 0);
+      const x = walkway.from.x + dx * t;
+      const z = walkway.from.z + dz * t;
+      positions.push(x + nx * half, GROUND_Y + height, z + nz * half, x - nx * half, GROUND_Y + height, z - nz * half);
+      if (i < steps) indices.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 1, i * 2 + 3, i * 2 + 2);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute("normal", new THREE.Float32BufferAttribute(new Array(positions.length).fill(0).map((_, k) => (k % 3 === 1 ? 1 : 0)), 3));
+    geometry.setIndex(indices);
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: material.color, flatShading: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: material.polygonOffsetFactor, polygonOffsetUnits: material.polygonOffsetUnits }));
+    scene.add(mesh);
+  });
 }
 
 // One flagstone: an irregular seven-sided slab with softened edges, never the
@@ -1361,9 +1424,12 @@ const stoneMaterials = [0x9b968d, 0x8c8880, 0xa8a398, 0x7d7a73, 0xb0aa9d].map((c
 
 // Is a spot on a path: on one of the rings, or on a walkway between two?
 function onPath(x, z) {
-  for (const centre of BED_CENTRES) {
+  for (const [bed, centre] of BED_CENTRES.entries()) {
     const edge = Math.max(Math.abs(x - centre.x), Math.abs(z - centre.z));
-    if (edge >= PATH_INNER && edge <= PATH_OUTER) return true;
+    if (edge < PATH_INNER || edge > PATH_OUTER) continue;
+    // Stop at the edge of the bed's earth, so the outer stones follow its wobbly outline.
+    const reach = earthRadius(bed, Math.atan2(z - centre.z, x - centre.x));
+    if (Math.hypot(x - centre.x, z - centre.z) <= reach - 0.45) return true;
   }
   return WALKWAYS.some((walkway) => {
     const { from, to } = walkway;
@@ -2898,7 +2964,8 @@ function buildCow(index) {
 const cows = Array.from({ length: COW_COUNT }, (_, i) => {
   const cow = buildCow(i);
   const angle = ((i + 0.3 * seeded(i + 5)) / COW_COUNT) * Math.PI * 2 + 0.4;
-  const radius = 21 + seeded(i * 3 + 1) * 5;
+  // The last cow's patch is pushed out a little further, to keep clear of the cottage.
+  const radius = 21 + seeded(i * 3 + 1) * 5 + (i === 4 ? 2 : 0);
   cow.home = {
     x: GARDEN_CENTRE.x + Math.cos(angle) * radius,
     z: GARDEN_CENTRE.z + Math.sin(angle) * radius,
@@ -2953,6 +3020,461 @@ function updateCows(timeSeconds) {
   });
 }
 
+// The far edge of the world, all for show: layered ridges of hills, and belts of trees in
+// front of them, so the lawn ends in a skyline. None of it is sent anything by the server,
+// nothing can be clicked, and nothing depends on it. The fog would turn it all to mist, so
+// it is hazed by hand instead: lit like the rest of the scene, then mixed toward the sky
+// colour, more for what is further away.
+const hillBase = new THREE.Color();
+
+// A ring of hills as one strip of triangles. The height rises and falls smoothly all the
+// way round and meets itself where it started.
+function ridgeGeometry(radius, base, amp, seed) {
+  const segments = 200;
+  const positions = [];
+  const indices = [];
+  for (let i = 0; i <= segments; i++) {
+    const a = (i / segments) * Math.PI * 2;
+    const wave = 0.55 * Math.sin(a * 2 + seed) + 0.3 * Math.sin(a * 5 + seed * 2.3) + 0.15 * Math.sin(a * 11 + seed * 4.1);
+    const x = GARDEN_CENTRE.x + Math.cos(a) * radius;
+    const z = GARDEN_CENTRE.z + Math.sin(a) * radius;
+    positions.push(x, GROUND_Y - 2, z, x, GROUND_Y + base + amp * (0.5 + 0.5 * wave), z);
+    if (i < segments) indices.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 1, i * 2 + 3, i * 2 + 2);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  return geometry;
+}
+
+const hillRings = [
+  { radius: 76, base: 7, amp: 10, seed: 1.1, haze: 0.66, colour: 0x7fa890 },
+  { radius: 68, base: 4.5, amp: 6.5, seed: 3.7, haze: 0.5, colour: 0x6c9c6c },
+  { radius: 60, base: 2.6, amp: 4.2, seed: 6.2, haze: 0.34, colour: 0x5a8e54 },
+].map((ring) => {
+  const material = new THREE.MeshBasicMaterial({ color: ring.colour, fog: false, side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(ridgeGeometry(ring.radius, ring.base, ring.amp, ring.seed), material);
+  mesh.frustumCulled = false;
+  scene.add(mesh);
+  return { material, ...ring };
+});
+
+// Merge a handful of shapes, each with its own colour, into one geometry, so a whole tree
+// is one thing to draw and a belt of them one instanced mesh.
+function mergeParts(parts) {
+  const positions = [];
+  const normals = [];
+  const colours = [];
+  for (const { geometry, colour, position = [0, 0, 0], scale = [1, 1, 1] } of parts) {
+    const piece = geometry.index ? geometry.toNonIndexed() : geometry.clone();
+    piece.applyMatrix4(new THREE.Matrix4().compose(new THREE.Vector3(...position), new THREE.Quaternion(), new THREE.Vector3(...scale)));
+    const paint = new THREE.Color(colour);
+    for (let i = 0; i < piece.attributes.position.count; i++) {
+      positions.push(piece.attributes.position.getX(i), piece.attributes.position.getY(i), piece.attributes.position.getZ(i));
+      normals.push(piece.attributes.normal.getX(i), piece.attributes.normal.getY(i), piece.attributes.normal.getZ(i));
+      colours.push(paint.r, paint.g, paint.b);
+    }
+  }
+  const merged = new THREE.BufferGeometry();
+  merged.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  merged.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  merged.setAttribute("color", new THREE.Float32BufferAttribute(colours, 3));
+  return merged;
+}
+
+const trunkParts = (height, colour) => ({ geometry: new THREE.CylinderGeometry(0.12, 0.18, height, 6), colour, position: [0, height / 2, 0] });
+// A fir: a trunk and three tiers of needles, each narrower than the one below.
+const firGeometry = mergeParts([
+  trunkParts(0.7, 0x5b3d26),
+  { geometry: new THREE.ConeGeometry(1.0, 1.3, 7), colour: 0x2f6b46, position: [0, 1.1, 0] },
+  { geometry: new THREE.ConeGeometry(0.78, 1.15, 7), colour: 0x3a7b4f, position: [0, 1.75, 0] },
+  { geometry: new THREE.ConeGeometry(0.54, 1.05, 7), colour: 0x468b58, position: [0, 2.4, 0] },
+]);
+// A broadleaf: a bare trunk under a crown made of several clumps of leaves.
+const leafyGeometry = mergeParts([
+  trunkParts(1.3, 0x6b4a2e),
+  ...[
+    [0, 1.9, 0, 0.95, 0x5a9a47],
+    [0.55, 1.6, 0.2, 0.65, 0x4c8a3f],
+    [-0.5, 1.65, -0.25, 0.7, 0x55964a],
+    [0.1, 2.45, -0.1, 0.66, 0x72b259],
+    [-0.25, 2.2, 0.45, 0.5, 0x4a8640],
+  ].map(([x, y, z, r, colour]) => ({ geometry: new THREE.IcosahedronGeometry(1, 1), colour, position: [x, y, z], scale: [r, r * 0.88, r] })),
+]);
+
+const TREE_BELTS = [
+  { inner: 32, outer: 40, count: 80, haze: 0.16, size: [1.5, 2.6] },
+  { inner: 43, outer: 54, count: 130, haze: 0.38, size: [2.0, 3.4] },
+].map((belt, beltIndex) => {
+  const material = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, fog: false });
+  const firs = new THREE.InstancedMesh(firGeometry, material, belt.count);
+  const leafy = new THREE.InstancedMesh(leafyGeometry, material, belt.count);
+  const dummy = new THREE.Object3D();
+  const tint = new THREE.Color();
+  let firN = 0;
+  let leafyN = 0;
+  for (let i = 0; i < belt.count; i++) {
+    const r = (n) => seeded(900 + beltIndex * 400 + i * 13 + n);
+    const angle = (i / belt.count) * Math.PI * 2 + (r(1) - 0.5) * 0.08;
+    // Thin the belt out in a slow wave so the trees come in clumps with gaps between.
+    if (Math.sin(angle * 5 + 1.3 + beltIndex * 2) + (r(2) - 0.5) * 1.1 < -0.35) continue;
+    const radius = belt.inner + r(3) * (belt.outer - belt.inner);
+    const size = belt.size[0] + r(4) * (belt.size[1] - belt.size[0]);
+    dummy.position.set(GARDEN_CENTRE.x + Math.cos(angle) * radius, GROUND_Y, GARDEN_CENTRE.z + Math.sin(angle) * radius);
+    dummy.rotation.set(0, r(6) * 6.28, 0);
+    dummy.scale.set(size, size * (0.9 + r(9) * 0.3), size);
+    dummy.updateMatrix();
+    tint.setRGB(0.82 + r(7) * 0.2, 0.84 + r(8) * 0.18, 0.78 + r(7) * 0.2);
+    if (r(5) < 0.55) {
+      firs.setMatrixAt(firN, dummy.matrix);
+      firs.setColorAt(firN++, tint);
+    } else {
+      leafy.setMatrixAt(leafyN, dummy.matrix);
+      leafy.setColorAt(leafyN++, tint);
+    }
+  }
+  firs.count = firN;
+  leafy.count = leafyN;
+  for (const mesh of [firs, leafy]) {
+    mesh.frustumCulled = false;
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.instanceColor.needsUpdate = true;
+    scene.add(mesh);
+  }
+  return { material, ...belt };
+});
+
+function updateHills() {
+  for (const ring of hillRings) {
+    hillBase.set(ring.colour);
+    for (const channel of ["r", "g", "b"]) {
+      hillBase[channel] *= Math.min(1, ambient.color[channel] * ambient.intensity * 1.4);
+    }
+    ring.material.color.copy(hillBase).lerp(skyColour, ring.haze);
+  }
+  // The trees keep their own colours and shading; the haze is added on top, as fog would.
+  for (const belt of TREE_BELTS) {
+    belt.material.color.setScalar(1 - belt.haze);
+    belt.material.emissive.copy(skyColour).multiplyScalar(belt.haze);
+  }
+}
+
+// A cottage behind the garden, facing it: cream walls, a honey-coloured thatch with
+// scalloped eaves, a round-topped door, shutters with hearts, a crooked chimney with
+// smoke, toadstools in the grass and a swing from the tree. The windows and the lantern
+// glow once the sun has gone down. It stands well clear of the beds, the paths and the
+// cows' patches, and a dirt lane winds from its gate to the gardens. All for show.
+const COTTAGE_AT = { x: 18, z: -25 };
+const COTTAGE_SCALE = 1.5;
+const cottageMat = {
+  wall: flatMaterial(0xfdf1dc),
+  stone: flatMaterial(0xb8a999),
+  thatch: [flatMaterial(0xdcb25a), flatMaterial(0xc99a45), flatMaterial(0xb8873a)],
+  wood: flatMaterial(0x7a5230),
+  door: flatMaterial(0x5fb0a4),
+  pink: flatMaterial(0xec8fab),
+  mint: flatMaterial(0x93d4b8),
+  trim: flatMaterial(0xfffaf0),
+  gold: flatMaterial(0xf2c14e),
+  leaf: flatMaterial(0x4f8a46),
+  leafLight: flatMaterial(0x62a455),
+  stem: flatMaterial(0x5a8f48),
+  toadstool: flatMaterial(0xe0524a),
+  white: flatMaterial(0xffffff),
+};
+const cottageGlass = new THREE.MeshBasicMaterial({ color: 0x9ec4d8, side: THREE.DoubleSide });
+const lanternGlass = new THREE.MeshBasicMaterial({ color: 0xe8cf9a });
+const glassDay = new THREE.Color(0x9ec4d8);
+const glassNight = new THREE.Color(0xffc45e);
+const lanternDay = new THREE.Color(0xe8cf9a);
+const lanternNight = new THREE.Color(0xffd66e);
+const smokeMaterial = new THREE.MeshBasicMaterial({ color: 0xe9e7e3, transparent: true, depthWrite: false });
+const BLOOMS = [0xe86a8a, 0xf5d24a, 0xc58cf0, 0xff9a5a, 0xffffff];
+const bloomMaterials = BLOOMS.map((colour) => flatMaterial(colour));
+const cottageSmoke = [];
+let cottageSwing = null;
+let cottageGroup = null;
+
+function buildCottage() {
+  const group = new THREE.Group();
+  const add = (mesh, x, y, z) => {
+    mesh.position.set(x, y, z);
+    group.add(mesh);
+    return mesh;
+  };
+  const box = (w, h, d, material, x, y, z) => add(new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material), x, y, z);
+  const ball = (rx, ry, rz, material, x, y, z) => add(cowBlob(rx, ry, rz, material), x, y, z);
+  const heart = (x, y, z, size, material) => {
+    ball(size, size, size * 0.4, material, x - size * 0.55, y + size * 0.3, z);
+    ball(size, size, size * 0.4, material, x + size * 0.55, y + size * 0.3, z);
+    const point = box(size * 1.5, size * 1.5, size * 0.4, material, x, y - size * 0.15, z);
+    point.rotation.z = Math.PI / 4;
+  };
+
+  // Walls on a stone footing, and a tall gable at each end.
+  box(4.5, 0.3, 3.3, cottageMat.stone, 0, 0.15, 0);
+  box(4.2, 1.8, 3.0, cottageMat.wall, 0, 1.2, 0);
+  const gableShape = new THREE.Shape([new THREE.Vector2(-1.5, 0), new THREE.Vector2(1.5, 0), new THREE.Vector2(0, 1.6)]);
+  const gableGeometry = new THREE.ExtrudeGeometry(gableShape, { depth: 4.2, bevelEnabled: false });
+  gableGeometry.translate(0, 0, -2.1);
+  gableGeometry.rotateY(Math.PI / 2);
+  add(new THREE.Mesh(gableGeometry, cottageMat.wall), 0, 2.1, 0);
+
+  // The thatch: two thick slabs that overhang, a row of rounded bundles along each eave
+  // to make it scalloped, and a rolled ridge with a knob at each end.
+  const pitch = Math.atan2(1.6, 1.5);
+  for (const side of [1, -1]) {
+    const slab = box(4.9, 0.26, 2.5, cottageMat.thatch[side > 0 ? 0 : 1], 0, 2.9, side * 0.75);
+    slab.rotation.x = side * pitch;
+    for (let x = -2.2; x <= 2.21; x += 0.3) {
+      ball(0.2, 0.14, 0.2, cottageMat.thatch[2], x, 1.96, side * 1.64);
+    }
+  }
+  const ridge = add(new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 5.0, 8), cottageMat.thatch[2]), 0, 3.74, 0);
+  ridge.rotation.z = Math.PI / 2;
+  ball(0.17, 0.17, 0.17, cottageMat.thatch[2], -2.5, 3.74, 0);
+  ball(0.17, 0.17, 0.17, cottageMat.thatch[2], 2.5, 3.74, 0);
+
+  // A little dormer window poking out of the front slope, with a tiny thatch roof of its own.
+  box(0.9, 0.66, 0.62, cottageMat.wall, 1.0, 2.95, 1.0);
+  add(new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.4), cottageGlass), 1.0, 2.95, 1.32);
+  box(0.62, 0.05, 0.05, cottageMat.trim, 1.0, 2.95, 1.335);
+  box(0.05, 0.42, 0.05, cottageMat.trim, 1.0, 2.95, 1.335);
+  for (const side of [1, -1]) {
+    const part = box(0.62, 0.06, 0.82, cottageMat.thatch[side > 0 ? 0 : 1], 1.0 + side * 0.22, 3.42, 1.05);
+    part.rotation.z = -side * 0.75;
+  }
+  ball(0.07, 0.07, 0.07, cottageMat.gold, 1.0, 3.7, 1.05);
+
+  // The front door is round at the top, in a stone arch, with a step and a golden knob.
+  const archRect = box(1.0, 1.05, 0.08, cottageMat.stone, -0.3, 0.83, 1.5);
+  const arch = add(new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.08, 16, 1, false, Math.PI / 2, Math.PI), cottageMat.stone), -0.3, 1.355, 1.5);
+  arch.rotation.x = Math.PI / 2;
+  box(0.8, 1.0, 0.1, cottageMat.door, -0.3, 0.8, 1.53);
+  const doorTop = add(new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.1, 16, 1, false, Math.PI / 2, Math.PI), cottageMat.door), -0.3, 1.3, 1.53);
+  doorTop.rotation.x = Math.PI / 2;
+  ball(0.045, 0.045, 0.045, cottageMat.gold, -0.05, 1.0, 1.6);
+  box(1.1, 0.12, 0.5, cottageMat.stone, -0.3, 0.36, 1.78);
+  void archRect;
+
+  // Two windows with crossbars, a heart on each shutter, and a box of flowers beneath.
+  [[-1.55, cottageMat.pink], [1.15, cottageMat.mint]].forEach(([x, shutter], n) => {
+    box(0.86, 0.78, 0.08, cottageMat.trim, x, 1.4, 1.52);
+    add(new THREE.Mesh(new THREE.PlaneGeometry(0.66, 0.58), cottageGlass), x, 1.4, 1.565);
+    box(0.66, 0.05, 0.05, cottageMat.trim, x, 1.4, 1.58);
+    box(0.05, 0.6, 0.05, cottageMat.trim, x, 1.4, 1.58);
+    for (const side of [-1, 1]) {
+      box(0.24, 0.78, 0.07, shutter, x + side * 0.56, 1.4, 1.53);
+      heart(x + side * 0.56, 1.45, 1.575, 0.045, cottageMat.trim);
+    }
+    box(0.9, 0.15, 0.22, cottageMat.wood, x, 0.93, 1.63);
+    for (let k = 0; k < 5; k++) {
+      ball(0.075, 0.075, 0.075, bloomMaterials[(k + n * 2) % 5], x - 0.34 + k * 0.17, 1.05 + (k % 2) * 0.03, 1.65);
+    }
+  });
+  // A round porthole in the end wall.
+  const portholeGlass = add(new THREE.Mesh(new THREE.CircleGeometry(0.2, 16), cottageGlass), -2.12, 2.7, 0);
+  portholeGlass.rotation.y = -Math.PI / 2;
+  const portholeRing = add(new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.05, 6, 16), cottageMat.trim), -2.1, 2.7, 0);
+  portholeRing.rotation.y = Math.PI / 2;
+
+  // A crooked chimney on the far end, with a pot and smoke drifting up from it.
+  const chimney = new THREE.Group();
+  chimney.position.set(1.85, 0.3, 0);
+  chimney.rotation.z = -0.06;
+  const chimneyBox = (w, h, d, material, y) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+    mesh.position.y = y;
+    chimney.add(mesh);
+  };
+  chimneyBox(0.65, 4.2, 0.75, cottageMat.stone, 2.1);
+  chimneyBox(0.8, 0.16, 0.9, cottageMat.stone, 4.28);
+  chimneyBox(0.3, 0.24, 0.3, cottageMat.wood, 4.46);
+  group.add(chimney);
+  for (let k = 0; k < 6; k++) {
+    const puff = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6), smokeMaterial.clone());
+    group.add(puff);
+    cottageSmoke.push(puff);
+  }
+
+  // The front garden: a white picket fence with a gate, stepping stones, tall flowers, shrubs,
+  // toadstools, and a lantern by the gate.
+  const FRONT = 3.1;
+  const post = (x, z) => {
+    add(new THREE.Mesh(picketPostGeometry, picketMaterial), x, 0.17, z);
+    add(new THREE.Mesh(picketCapGeometry, picketMaterial), x, 0.375, z);
+  };
+  const run = (x1, z1, x2, z2) => {
+    const steps = Math.max(2, Math.round(Math.hypot(x2 - x1, z2 - z1) / 0.22));
+    for (let i = 0; i <= steps; i++) post(x1 + ((x2 - x1) * i) / steps, z1 + ((z2 - z1) * i) / steps);
+    const rail = (y) => {
+      const length = Math.hypot(x2 - x1, z2 - z1);
+      const mesh = box(Math.abs(x2 - x1) > Math.abs(z2 - z1) ? length : 0.04, 0.04, Math.abs(x2 - x1) > Math.abs(z2 - z1) ? 0.04 : length, cottageMat.trim, (x1 + x2) / 2, y, (z1 + z2) / 2);
+      return mesh;
+    };
+    rail(0.12);
+    rail(0.26);
+  };
+  run(-3.2, FRONT, -0.95, FRONT);
+  run(0.35, FRONT, 3.2, FRONT);
+  run(-3.2, FRONT, -3.2, 0.4);
+  run(3.2, FRONT, 3.2, 0.4);
+  for (const [x, z] of [[-0.95, FRONT], [0.35, FRONT]]) {
+    box(0.1, 0.5, 0.1, cottageMat.wood, x, 0.25, z);
+    ball(0.075, 0.075, 0.075, cottageMat.gold, x, 0.55, z);
+  }
+  [[-0.3, 2.35], [-0.12, 2.8], [-0.36, 3.25]].forEach(([x, z]) => {
+    add(new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.3, 0.06, 7), cottageMat.stone), x, 0.04, z);
+  });
+  for (let k = 0; k < 10; k++) {
+    const r = (n) => seeded(2300 + k * 9 + n);
+    const x = k < 5 ? -2.7 + r(1) * 1.7 : 1.1 + r(1) * 1.7;
+    const height = 0.55 + r(2) * 0.5;
+    add(new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.025, height, 5), cottageMat.stem), x, height / 2 + 0.15, 1.95 + r(3) * 0.7);
+    ball(0.09, 0.09, 0.09, bloomMaterials[k % 5], x, height + 0.17, group.children[group.children.length - 1].position.z);
+  }
+  for (let k = 0; k < 16; k++) {
+    const r = (n) => seeded(2500 + k * 7 + n);
+    ball(0.075, 0.075, 0.075, bloomMaterials[k % 5], -2.9 + r(1) * 5.8, 0.1 + r(2) * 0.05, 1.8 + r(3) * 1.15);
+  }
+  for (const [x, z, s] of [[-2.3, 1.85, 0.42], [1.7, 1.85, 0.38], [-2.95, 1.0, 0.36], [3.0, 1.1, 0.34]]) {
+    ball(s, s * 0.85, s, cottageMat.leaf, x, s * 0.55, z);
+    ball(s * 0.6, s * 0.5, s * 0.6, cottageMat.leafLight, x + s * 0.35, s * 0.95, z + s * 0.1);
+  }
+  for (const [x, z, s] of [[-2.0, 2.3, 1], [2.3, 2.5, 0.8], [-3.7, 2.0, 1.1], [3.8, 0.8, 0.9], [0.9, 3.9, 0.75]]) {
+    add(new THREE.Mesh(new THREE.CylinderGeometry(0.05 * s, 0.07 * s, 0.17 * s, 6), cottageMat.trim), x, 0.085 * s, z);
+    const cap = ball(0.19 * s, 0.14 * s, 0.19 * s, cottageMat.toadstool, x, 0.2 * s, z);
+    for (let k = 0; k < 3; k++) {
+      ball(0.035 * s, 0.025 * s, 0.035 * s, cottageMat.white, x + (k - 1) * 0.08 * s, 0.3 * s + (k === 1 ? 0.01 : 0), z + (k % 2 ? 0.05 : -0.05) * s);
+    }
+    void cap;
+  }
+  box(0.07, 1.0, 0.07, cottageMat.wood, 0.75, 0.5, FRONT + 0.05);
+  const lantern = add(new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.26, 0.2), lanternGlass), 0.75, 1.13, FRONT + 0.05);
+  void lantern;
+  add(new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.14, 4), cottageMat.wood), 0.75, 1.33, FRONT + 0.05).rotation.y = Math.PI / 4;
+
+  // A tree beside it, with a birdhouse on the trunk and a swing from a branch.
+  const treeX = -3.9;
+  const treeZ = -1.2;
+  add(new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.3, 2.3, 7), cottageMat.wood), treeX, 1.15, treeZ);
+  for (const [dx, dy, dz, rx, ry, material] of [[0, 3.1, 0, 1.55, 1.25, cottageMat.leaf], [0.9, 2.65, 0.4, 1.0, 0.85, cottageMat.leafLight], [-0.85, 2.7, -0.3, 1.05, 0.9, cottageMat.leaf], [0.1, 3.8, -0.1, 0.95, 0.8, cottageMat.leafLight]]) {
+    ball(rx, ry, rx, material, treeX + dx, dy, treeZ + dz);
+  }
+  const branch = add(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.1, 2.0, 6), cottageMat.wood), treeX, 2.15, treeZ + 0.95);
+  branch.rotation.x = Math.PI / 2;
+  const swing = new THREE.Group();
+  swing.position.set(treeX, 2.12, treeZ + 1.55);
+  for (const side of [-1, 1]) {
+    const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 1.5, 4), cottageMat.trim);
+    rope.position.set(side * 0.24, -0.75, 0);
+    swing.add(rope);
+  }
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.06, 0.26), cottageMat.pink);
+  seat.position.y = -1.5;
+  swing.add(seat);
+  group.add(swing);
+  cottageSwing = swing;
+  const birdhouse = box(0.24, 0.26, 0.24, cottageMat.mint, treeX + 0.25, 1.5, treeZ + 0.22);
+  birdhouse.rotation.y = 0.8;
+  add(new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.16, 4), cottageMat.pink), treeX + 0.25, 1.72, treeZ + 0.22).rotation.y = 0.8 + Math.PI / 4;
+
+  // Faces the garden.
+  group.position.set(COTTAGE_AT.x, GROUND_Y, COTTAGE_AT.z);
+  group.rotation.y = Math.atan2(GARDEN_CENTRE.x - COTTAGE_AT.x, GARDEN_CENTRE.z - COTTAGE_AT.z);
+  group.scale.setScalar(COTTAGE_SCALE);
+  scene.add(group);
+  group.updateMatrixWorld(true);
+  cottageGroup = group;
+}
+buildCottage();
+
+// Dirt lanes wind from the cottage gate to the gardens: one to the walkway between the
+// Fruit and Vegetable Gardens, one round the side to the walkway by the Flower Garden. A
+// lane is only a strip of ground colour with a few pebbles along its edges: figures still
+// walk only on the flagstones, and nothing depends on where a lane goes.
+const laneSamples = [];
+const laneMaterial = new THREE.MeshStandardMaterial({ color: 0xa98d62, flatShading: true, side: THREE.DoubleSide });
+laneMaterial.polygonOffset = true;
+laneMaterial.polygonOffsetFactor = -2;
+laneMaterial.polygonOffsetUnits = -2;
+
+function buildLane(points, width, seed) {
+  const curve = new THREE.CatmullRomCurve3(points.map(([x, z]) => new THREE.Vector3(x, 0, z)), false, "catmullrom", 0.5);
+  const steps = Math.ceil(curve.getLength() * 3);
+  const positions = [];
+  const indices = [];
+  const edges = [];
+  for (let i = 0; i <= steps; i++) {
+    const p = curve.getPointAt(i / steps);
+    const t = curve.getTangentAt(i / steps);
+    const half = (width * (0.9 + 0.2 * Math.sin(i * 0.5 + seed))) / 2;
+    const nx = -t.z;
+    const nz = t.x;
+    positions.push(p.x + nx * half, GROUND_Y + 0.022, p.z + nz * half, p.x - nx * half, GROUND_Y + 0.022, p.z - nz * half);
+    if (i < steps) indices.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 1, i * 2 + 3, i * 2 + 2);
+    laneSamples.push({ x: p.x, z: p.z });
+    if (i % 2 === 0) edges.push({ x: p.x, z: p.z, nx, nz, half, i });
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(new Array(positions.length).fill(0).map((_, k) => (k % 3 === 1 ? 1 : 0)), 3));
+  geometry.setIndex(indices);
+  scene.add(new THREE.Mesh(geometry, laneMaterial));
+  return edges;
+}
+
+{
+  const gate = cottageGroup.localToWorld(new THREE.Vector3(-0.3, 0, 3.6));
+  const bend = (from, to, t, push) => {
+    const dx = to[0] - from[0];
+    const dz = to[1] - from[1];
+    const length = Math.hypot(dx, dz);
+    return [from[0] + dx * t - (dz / length) * push, from[1] + dz * t + (dx / length) * push];
+  };
+  const here = [gate.x, gate.z];
+  const toWalkway = [6, -17.2];
+  const laneA = [here, bend(here, toWalkway, 0.3, 1.3), bend(here, toWalkway, 0.62, -1.2), toWalkway, [6, -12.6]];
+  const laneB = [bend(here, toWalkway, 0.14, 0.4), [here[0] + 5.4, here[1] + 0.6], [21.6, -17.4], [20.4, -11.6], [17.6, -7.4], [14.2, -6.1], [12.6, -6.0]];
+  const edges = [...buildLane(laneA, 1.25, 0.4), ...buildLane(laneB, 1.1, 2.2)];
+  const pebbles = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), flatMaterial(0xffffff), edges.length * 2);
+  const dummy = new THREE.Object3D();
+  const tint = new THREE.Color();
+  let n = 0;
+  edges.forEach((edge, k) => {
+    for (const side of [1, -1]) {
+      const r = (m) => seeded(3100 + k * 11 + side * 5 + m);
+      if (r(1) < 0.4) continue;
+      const out = edge.half + 0.06 + r(2) * 0.18;
+      dummy.position.set(edge.x + edge.nx * out * side, GROUND_Y + 0.03, edge.z + edge.nz * out * side);
+      const size = 0.07 + r(3) * 0.11;
+      dummy.scale.set(size, size * 0.55, size * 0.8);
+      dummy.rotation.set(0, r(4) * 6.28, 0);
+      dummy.updateMatrix();
+      pebbles.setMatrixAt(n, dummy.matrix);
+      pebbles.setColorAt(n++, tint.setRGB(0.55 + r(5) * 0.35, 0.53 + r(5) * 0.33, 0.48 + r(5) * 0.3));
+    }
+  });
+  pebbles.count = n;
+  pebbles.frustumCulled = false;
+  pebbles.instanceMatrix.needsUpdate = true;
+  pebbles.instanceColor.needsUpdate = true;
+  scene.add(pebbles);
+}
+
+function updateCottage(timeSeconds) {
+  // Lamplight in the windows and the lantern from dusk until dawn.
+  cottageGlass.color.copy(glassNight).lerp(glassDay, dayness);
+  lanternGlass.color.copy(lanternNight).lerp(lanternDay, dayness);
+  cottageSmoke.forEach((puff, k) => {
+    const p = (timeSeconds / 9 + k / cottageSmoke.length) % 1;
+    puff.position.set(1.85 + p * 1.5, 4.7 + p * 2.6, p * 0.5);
+    puff.scale.setScalar(0.18 + p * 0.48);
+    puff.material.opacity = 0.6 * Math.min(p / 0.12, 1) * (1 - p);
+  });
+  cottageSwing.rotation.x = Math.sin(timeSeconds * 0.9) * 0.14;
+}
+
 function animate() {
   requestAnimationFrame(animate);
   const now = performance.now();
@@ -2965,6 +3487,8 @@ function animate() {
   updateClouds(serverNow() / 1000);
   updateInsects(serverNow() / 1000);
   updateCows(serverNow() / 1000);
+  updateHills();
+  updateCottage(serverNow() / 1000);
   updateDrops(now);
   updateBadges(now);
   updateFigures(now);
