@@ -281,7 +281,13 @@ body {
   font-weight: 600;
 }
 
-#wave-button {
+.you-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+#wave-button,
+#camera-button {
   font: inherit;
   font-size: 0.85rem;
   padding: 0.25rem 0.9rem;
@@ -292,7 +298,8 @@ body {
   cursor: pointer;
 }
 
-#wave-button:disabled {
+#wave-button:disabled,
+#camera-button:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -449,9 +456,326 @@ body {
   vertical-align: -0.1em;
 }
 
+/* A photo from the album fills the page, so the panels and signs behind it are hidden. */
+body.album-open #status-bar,
+body.album-open .bed-sign,
+body.album-open #panels {
+  visibility: hidden;
+}
+
+/* Photo mode: everything on the page steps aside, leaving the garden and a frame to
+   choose what to capture. Outside the frame is dimmed but still turns the view. */
+body.photo-mode #panels,
+body.photo-mode #status-bar,
+body.photo-mode .bed-sign {
+  display: none !important;
+}
+
+#photo-ui {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+#photo-frame {
+  position: fixed;
+  box-sizing: border-box;
+  border: 2px solid #ffffff;
+  border-radius: 4px;
+  box-shadow: 0 0 0 200vmax rgba(10, 20, 10, 0.45);
+  background-image:
+    linear-gradient(to right, transparent calc(33.33% - 0.5px), rgba(255, 255, 255, 0.35) calc(33.33% - 0.5px), rgba(255, 255, 255, 0.35) calc(33.33% + 0.5px), transparent calc(33.33% + 0.5px), transparent calc(66.66% - 0.5px), rgba(255, 255, 255, 0.35) calc(66.66% - 0.5px), rgba(255, 255, 255, 0.35) calc(66.66% + 0.5px), transparent calc(66.66% + 0.5px)),
+    linear-gradient(to bottom, transparent calc(33.33% - 0.5px), rgba(255, 255, 255, 0.35) calc(33.33% - 0.5px), rgba(255, 255, 255, 0.35) calc(33.33% + 0.5px), transparent calc(33.33% + 0.5px), transparent calc(66.66% - 0.5px), rgba(255, 255, 255, 0.35) calc(66.66% - 0.5px), rgba(255, 255, 255, 0.35) calc(66.66% + 0.5px), transparent calc(66.66% + 0.5px));
+  pointer-events: auto;
+  touch-action: none;
+  cursor: move;
+}
+
+#photo-frame:focus-visible {
+  outline: 3px solid #ffd54a;
+  outline-offset: 3px;
+}
+
+.photo-handle {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  background: #ffffff;
+  border: 2px solid #3d6b3a;
+  border-radius: 50%;
+  touch-action: none;
+}
+
+/* A larger invisible target round each handle, so a finger can grab it. */
+.photo-handle::after {
+  content: "";
+  position: absolute;
+  inset: -14px;
+}
+
+.photo-handle[data-corner="nw"] { left: -10px; top: -10px; cursor: nwse-resize; }
+.photo-handle[data-corner="se"] { right: -10px; bottom: -10px; cursor: nwse-resize; }
+.photo-handle[data-corner="ne"] { right: -10px; top: -10px; cursor: nesw-resize; }
+.photo-handle[data-corner="sw"] { left: -10px; bottom: -10px; cursor: nesw-resize; }
+
+#photo-hint,
+#photo-bar {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
+  pointer-events: auto;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.18);
+  color: #1b2a1b;
+}
+
+.hint-short {
+  display: none;
+}
+
+#photo-hint {
+  top: 12px;
+  margin: 0;
+  padding: 0.4rem 0.9rem;
+  border-radius: 14px;
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+#photo-bar {
+  bottom: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 18px;
+}
+
+#photo-bar[hidden] {
+  display: none;
+}
+
+#photo-shapes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+#photo-shapes button,
+#photo-close {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.8rem;
+  border: 1px solid #9fb997;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #1b2a1b;
+  cursor: pointer;
+}
+
+#photo-shutter {
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 0.35rem 1rem;
+  border: 1px solid #2f5a2d;
+  border-radius: 999px;
+  background: #3d6b3a;
+  color: #ffffff;
+  cursor: pointer;
+}
+
+#photo-flash {
+  position: fixed;
+  inset: 0;
+  background: #ffffff;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#photo-flash.is-flashing {
+  animation: photo-flash 0.35s ease-out;
+}
+
+@keyframes photo-flash {
+  from { opacity: 0.85; }
+  to { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #photo-flash.is-flashing {
+    animation: none;
+  }
+}
+
+/* The photo just taken, with what to do with it. The frame and bar give way to it. */
+#photo-preview,
+#album-view {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.8rem;
+  padding: 16px;
+  box-sizing: border-box;
+  background: rgba(10, 20, 10, 0.92);
+  pointer-events: auto;
+}
+
+#photo-preview[hidden],
+#album-view[hidden] {
+  display: none;
+}
+
+#photo-preview-img,
+#album-view-img {
+  max-width: 100%;
+  max-height: calc(100% - 4rem);
+  border: 3px solid #ffffff;
+  border-radius: 4px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+}
+
+.photo-preview-actions {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.photo-preview-actions button {
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.4rem 1.1rem;
+  border: 1px solid #9fb997;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #1b2a1b;
+  cursor: pointer;
+}
+
+#photo-download,
+#album-save {
+  background: #3d6b3a;
+  border-color: #3d6b3a;
+  color: #ffffff;
+}
+
+#photo-save {
+  background: #ffffff;
+}
+
+#photo-save:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+#photo-note {
+  min-height: 1.2em;
+  margin: 0;
+  padding: 0.2rem 0.8rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  font-size: 0.85rem;
+  color: #1b2a1b;
+}
+
+#photo-note:empty {
+  visibility: hidden;
+}
+
+#album-view {
+  z-index: 4;
+}
+
+#album-delete.is-sure {
+  background: #b3382c;
+  border-color: #b3382c;
+  color: #ffffff;
+}
+
+/* The photos you have kept, as small pictures. No count or total is shown. */
+#album-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+#album-grid button {
+  padding: 0;
+  aspect-ratio: 1;
+  border: 1px solid #9fb997;
+  border-radius: 6px;
+  background: #e6efe2;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+#album-grid img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+#photo-shapes button[aria-checked="true"] {
+  background: #3d6b3a;
+  border-color: #3d6b3a;
+  color: #ffffff;
+}
+
 /* Narrow screens: the panel becomes a sheet along the bottom, and the status
    line moves to the top so the two don't overlap. */
 @media (max-width: 700px) {
+  .hint-long {
+    display: none;
+  }
+
+  .hint-short {
+    display: inline;
+  }
+
+  #photo-hint {
+    top: 8px;
+    padding: 0.3rem 0.7rem;
+    font-size: 0.78rem;
+  }
+
+  #photo-bar {
+    bottom: 8px;
+    gap: 0.4rem;
+    padding: 0.4rem 0.5rem;
+  }
+
+  #photo-shapes {
+    flex-wrap: nowrap;
+  }
+
+  #photo-shapes button,
+  #photo-close,
+  #photo-shutter {
+    padding: 0.35rem 0.6rem;
+    font-size: 0.8rem;
+  }
+
+  #photo-preview .photo-preview-actions,
+  #album-view .photo-preview-actions {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  #album-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
+
   #panels {
     top: auto;
     bottom: 0;

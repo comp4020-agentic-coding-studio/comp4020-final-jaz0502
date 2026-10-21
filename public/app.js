@@ -2693,6 +2693,7 @@ let actionsPausedUntil = 0;
 const SLOW_DOWN_MESSAGE = "Slow down: too many actions, try again in a few seconds";
 
 async function handlePointerClick(event) {
+  if (photoMode) return; // the camera only looks: nothing in the garden is touched
   raycaster.setFromCamera(ndcFromEvent(event), camera);
   const hit = raycaster.intersectObjects(soilMeshes, false)[0];
   if (!hit) {
@@ -2824,6 +2825,7 @@ function clearHoveredPlot() {
 }
 
 renderer.domElement.addEventListener("pointermove", (event) => {
+  if (photoMode) return;
   raycaster.setFromCamera(ndcFromEvent(event), camera);
   const hit = raycaster.intersectObjects(soilMeshes, false)[0];
   let position = hit ? hit.object.userData.position : null;
@@ -2865,6 +2867,497 @@ renderer.domElement.addEventListener("pointerleave", () => {
   setHoveredBed(null);
   clearStatusBarHover();
 });
+
+// Photo mode. The panels, signs and status line step aside and a frame appears over
+// the garden, which can be moved and resized and set to a shape. Dragging outside the
+// frame still turns the view. It is only a way of looking: while it is open nothing in
+// the garden can be clicked, and the server is told nothing.
+const PHOTO_SHAPES = { free: null, wide: 16 / 9, square: 1, portrait: 3 / 4 };
+const PHOTO_MIN = 80; // the smallest the frame's shorter side can be, in pixels
+const photoUi = document.getElementById("photo-ui");
+const photoFrameEl = document.getElementById("photo-frame");
+const photoShapeButtons = [...document.querySelectorAll("#photo-shapes button")];
+const cameraButton = document.getElementById("camera-button");
+let photoMode = false;
+let photoShape = "wide";
+const photoFrame = { x: 0, y: 0, w: 0, h: 0 };
+
+function photoBounds() {
+  return { vw: container.clientWidth, vh: container.clientHeight };
+}
+
+function applyPhotoFrame() {
+  photoFrameEl.style.left = `${photoFrame.x}px`;
+  photoFrameEl.style.top = `${photoFrame.y}px`;
+  photoFrameEl.style.width = `${photoFrame.w}px`;
+  photoFrameEl.style.height = `${photoFrame.h}px`;
+}
+
+// Give the frame a shape, keeping its width and centre where the window allows.
+function shapePhotoFrame(shape) {
+  const { vw, vh } = photoBounds();
+  const ratio = PHOTO_SHAPES[shape];
+  const cx = photoFrame.x + photoFrame.w / 2;
+  const cy = photoFrame.y + photoFrame.h / 2;
+  let w = photoFrame.w;
+  let h = photoFrame.h;
+  if (ratio !== null) {
+    h = w / ratio;
+    if (h > vh * 0.9) {
+      h = vh * 0.9;
+      w = h * ratio;
+    }
+    if (w > vw * 0.9) {
+      w = vw * 0.9;
+      h = w / ratio;
+    }
+  }
+  w = Math.min(Math.max(w, PHOTO_MIN), vw);
+  h = Math.min(Math.max(h, PHOTO_MIN), vh);
+  photoFrame.w = w;
+  photoFrame.h = h;
+  photoFrame.x = Math.min(Math.max(cx - w / 2, 0), vw - w);
+  photoFrame.y = Math.min(Math.max(cy - h / 2, 0), vh - h);
+  applyPhotoFrame();
+}
+
+function setPhotoShape(shape) {
+  photoShape = shape;
+  photoShapeButtons.forEach((b) => b.setAttribute("aria-checked", String(b.dataset.shape === shape)));
+  shapePhotoFrame(shape);
+}
+
+function openPhotoMode() {
+  if (photoMode) return;
+  photoMode = true;
+  clearHoveredPlot();
+  setHoveredBed(null);
+  clearStatusBarHover();
+  document.body.classList.add("photo-mode");
+  photoUi.hidden = false;
+  updateViewOffset();
+  const { vw, vh } = photoBounds();
+  photoFrame.w = Math.min(vw * 0.7, vh * 0.7 * (16 / 9));
+  photoFrame.h = photoFrame.w * (9 / 16);
+  photoFrame.x = (vw - photoFrame.w) / 2;
+  photoFrame.y = (vh - photoFrame.h) / 2;
+  setPhotoShape(photoShape);
+  photoFrameEl.focus({ preventScroll: true });
+}
+
+function closePhotoMode() {
+  if (!photoMode) return;
+  photoMode = false;
+  photoRequested = false;
+  photoShutter.disabled = false;
+  clearPhoto();
+  showPhotoPreview(false);
+  document.body.classList.remove("photo-mode");
+  photoUi.hidden = true;
+  updateViewOffset();
+  cameraButton.focus({ preventScroll: true });
+}
+
+// Taking the photo: copy the part of the canvas inside the frame into a smaller
+// picture. It stays in this page, and the server is told nothing.
+const PHOTO_MAX_EDGE = 1600; // the longest side of a saved photo, in pixels
+const photoPreview = document.getElementById("photo-preview");
+const photoPreviewImg = document.getElementById("photo-preview-img");
+const photoFlash = document.getElementById("photo-flash");
+const photoShutter = document.getElementById("photo-shutter");
+let photoRequested = false;
+let photoUrl = null;
+let photoBlob = null;
+
+function takePhoto() {
+  photoRequested = false;
+  const canvas = renderer.domElement;
+  const scale = canvas.width / container.clientWidth;
+  const sx = Math.round(photoFrame.x * scale);
+  const sy = Math.round(photoFrame.y * scale);
+  const sw = Math.max(1, Math.min(Math.round(photoFrame.w * scale), canvas.width - sx));
+  const sh = Math.max(1, Math.min(Math.round(photoFrame.h * scale), canvas.height - sy));
+  const shrink = Math.min(1, PHOTO_MAX_EDGE / Math.max(sw, sh));
+  const out = document.createElement("canvas");
+  out.width = Math.max(1, Math.round(sw * shrink));
+  out.height = Math.max(1, Math.round(sh * shrink));
+  out.getContext("2d").drawImage(canvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
+  photoFlash.classList.remove("is-flashing");
+  void photoFlash.offsetWidth; // so the flash can play again
+  photoFlash.classList.add("is-flashing");
+  out.toBlob(
+    (blob) => {
+      photoShutter.disabled = false;
+      if (!blob || !photoMode) return;
+      clearPhoto();
+      photoBlob = blob;
+      photoTakenAt = Date.now();
+      photoUrl = URL.createObjectURL(blob);
+      photoPreviewImg.src = photoUrl;
+      showPhotoPreview(true);
+    },
+    "image/jpeg",
+    0.85,
+  );
+}
+
+function clearPhoto() {
+  if (photoUrl) URL.revokeObjectURL(photoUrl);
+  photoUrl = null;
+  photoBlob = null;
+  photoPreviewImg.removeAttribute("src");
+}
+
+// While the photo is shown, the frame and the bar step aside.
+function showPhotoPreview(show) {
+  photoPreview.hidden = !show;
+  if (show) {
+    photoSave.disabled = false;
+    photoNote.textContent = "";
+  }
+  photoFrameEl.hidden = show;
+  document.getElementById("photo-hint").hidden = show;
+  document.getElementById("photo-bar").hidden = show;
+  if (show) document.getElementById("photo-download").focus({ preventScroll: true });
+  else photoFrameEl.focus({ preventScroll: true });
+}
+
+photoShutter.addEventListener("click", () => {
+  if (photoRequested || !photoMode) return;
+  photoShutter.disabled = true;
+  photoRequested = true;
+});
+document.getElementById("photo-retake").addEventListener("click", () => {
+  clearPhoto();
+  showPhotoPreview(false);
+});
+// Hand a picture to the browser as a file, named for when it was taken.
+function downloadPhoto(url, takenAt) {
+  const t = new Date(takenAt);
+  const pad = (n) => String(n).padStart(2, "0");
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `community-garden-${t.getFullYear()}${pad(t.getMonth() + 1)}${pad(t.getDate())}-${pad(t.getHours())}${pad(t.getMinutes())}${pad(t.getSeconds())}.jpg`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+document.getElementById("photo-download").addEventListener("click", () => {
+  if (photoUrl) downloadPhoto(photoUrl, photoTakenAt);
+});
+
+// The album: photos kept in this browser's own storage (IndexedDB), never sent
+// anywhere. Each is stored with a small thumbnail so the grid stays light. There is
+// room for ALBUM_CAP photos; when it is full a new one is turned away with a message
+// and nothing is dropped. If the browser won't give storage, the camera still works
+// and photos can be saved to the device.
+const ALBUM_CAP = 24;
+const THUMB_EDGE = 240;
+const albumGrid = document.getElementById("album-grid");
+const albumNote = document.getElementById("album-note");
+const albumDetails = document.getElementById("album");
+const photoSave = document.getElementById("photo-save");
+const photoNote = document.getElementById("photo-note");
+let albumDb = null;
+let albumPhotos = []; // newest first: { id, blob, thumbUrl, takenAt }
+let photoTakenAt = Date.now();
+
+function openAlbumDb() {
+  return new Promise((resolve, reject) => {
+    try {
+      const request = indexedDB.open("garden-album", 1);
+      request.onupgradeneeded = () => request.result.createObjectStore("photos", { keyPath: "id", autoIncrement: true });
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+      request.onblocked = () => reject(new Error("blocked"));
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+function albumRequest(mode, work) {
+  return new Promise((resolve, reject) => {
+    const tx = albumDb.transaction("photos", mode);
+    const request = work(tx.objectStore("photos"));
+    tx.oncomplete = () => resolve(request.result);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+
+function renderAlbum() {
+  albumGrid.replaceChildren();
+  for (const photo of albumPhotos) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("role", "listitem");
+    button.setAttribute("aria-label", `Photo taken ${new Date(photo.takenAt).toLocaleString()}`);
+    const img = document.createElement("img");
+    img.src = photo.thumbUrl;
+    img.alt = "";
+    button.appendChild(img);
+    button.addEventListener("click", () => openAlbumView(photo));
+    albumGrid.appendChild(button);
+  }
+  if (!albumDb) albumNote.textContent = "Your browser won't keep photos here, so use Save to device.";
+  else albumNote.textContent = albumPhotos.length ? "Kept in this browser only. Nobody else sees them." : "No photos yet. Photos you take are kept in this browser only.";
+  updateViewOffset();
+}
+
+async function loadAlbum() {
+  try {
+    albumDb = await openAlbumDb();
+    const rows = await albumRequest("readonly", (store) => store.getAll());
+    rows.sort((a, b) => b.takenAt - a.takenAt);
+    albumPhotos = rows.map((r) => ({ id: r.id, blob: r.blob, thumbUrl: URL.createObjectURL(r.thumb), takenAt: r.takenAt }));
+  } catch {
+    albumDb = null;
+    albumPhotos = [];
+  }
+  renderAlbum();
+}
+loadAlbum();
+albumDetails.addEventListener("toggle", updateViewOffset);
+
+async function makeThumb(blob) {
+  const bitmap = await createImageBitmap(blob);
+  const shrink = Math.min(1, THUMB_EDGE / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * shrink));
+  canvas.height = Math.max(1, Math.round(bitmap.height * shrink));
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("thumb"))), "image/jpeg", 0.8));
+}
+
+photoSave.addEventListener("click", async () => {
+  if (!photoBlob) return;
+  if (!albumDb) {
+    photoNote.textContent = "Your browser won't keep photos here. Use Save to device instead.";
+    return;
+  }
+  if (albumPhotos.length >= ALBUM_CAP) {
+    photoNote.textContent = "Your album is full. Save this one to your device, or delete a photo from the album first.";
+    return;
+  }
+  photoSave.disabled = true;
+  try {
+    const takenAt = photoTakenAt;
+    const thumb = await makeThumb(photoBlob);
+    await albumRequest("readwrite", (store) => store.add({ blob: photoBlob, thumb, takenAt }));
+    await loadAlbum();
+    photoNote.textContent = "Saved to your album.";
+  } catch {
+    photoSave.disabled = false;
+    photoNote.textContent = "Couldn't save to the album. Use Save to device instead.";
+  }
+});
+
+// A kept photo, larger, with a way to save it to the device or delete it.
+const albumView = document.getElementById("album-view");
+const albumViewImg = document.getElementById("album-view-img");
+const albumDelete = document.getElementById("album-delete");
+let albumViewing = null;
+let albumViewUrl = null;
+
+function openAlbumView(photo) {
+  albumViewing = photo;
+  albumViewUrl = URL.createObjectURL(photo.blob);
+  albumViewImg.src = albumViewUrl;
+  resetAlbumDelete();
+  albumView.hidden = false;
+  document.body.classList.add("album-open");
+  document.getElementById("album-save").focus({ preventScroll: true });
+}
+
+function closeAlbumView() {
+  if (albumView.hidden) return;
+  albumView.hidden = true;
+  document.body.classList.remove("album-open");
+  albumViewImg.removeAttribute("src");
+  if (albumViewUrl) URL.revokeObjectURL(albumViewUrl);
+  albumViewUrl = null;
+  albumViewing = null;
+}
+
+function resetAlbumDelete() {
+  albumDelete.textContent = "Delete";
+  albumDelete.classList.remove("is-sure");
+}
+
+document.getElementById("album-close").addEventListener("click", closeAlbumView);
+document.getElementById("album-save").addEventListener("click", () => {
+  if (albumViewing) downloadPhoto(albumViewUrl, albumViewing.takenAt);
+});
+// Deleting asks twice, in the button itself, since it can't be undone.
+albumDelete.addEventListener("click", async () => {
+  if (!albumViewing) return;
+  if (!albumDelete.classList.contains("is-sure")) {
+    albumDelete.textContent = "Really delete?";
+    albumDelete.classList.add("is-sure");
+    return;
+  }
+  const { id } = albumViewing;
+  try {
+    await albumRequest("readwrite", (store) => store.delete(id));
+  } catch {
+    albumDelete.textContent = "Couldn't delete";
+    return;
+  }
+  const gone = albumPhotos.find((p) => p.id === id);
+  if (gone) URL.revokeObjectURL(gone.thumbUrl);
+  albumPhotos = albumPhotos.filter((p) => p.id !== id);
+  closeAlbumView();
+  renderAlbum();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeAlbumView();
+});
+
+cameraButton.addEventListener("click", openPhotoMode);
+document.getElementById("photo-close").addEventListener("click", closePhotoMode);
+document.getElementById("photo-done").addEventListener("click", closePhotoMode);
+document.addEventListener("keydown", (event) => {
+  if (photoMode && event.key === "Escape") closePhotoMode();
+});
+photoShapeButtons.forEach((b) => b.addEventListener("click", () => setPhotoShape(b.dataset.shape)));
+window.addEventListener("resize", () => {
+  if (photoMode) shapePhotoFrame(photoShape);
+});
+
+// Dragging the frame moves it; dragging a corner resizes it from the opposite corner.
+// Scale the frame about its centre, keeping its shape, as far as the window allows.
+// Pinching and the keyboard both use it.
+function scalePhotoFrame(from, scale) {
+  const { vw, vh } = photoBounds();
+  const lowest = Math.max(PHOTO_MIN / from.w, PHOTO_MIN / from.h);
+  const highest = Math.min(vw / from.w, vh / from.h);
+  const s = Math.min(Math.max(scale, Math.min(lowest, highest)), highest);
+  const cx = from.x + from.w / 2;
+  const cy = from.y + from.h / 2;
+  photoFrame.w = from.w * s;
+  photoFrame.h = from.h * s;
+  photoFrame.x = Math.min(Math.max(cx - photoFrame.w / 2, 0), vw - photoFrame.w);
+  photoFrame.y = Math.min(Math.max(cy - photoFrame.h / 2, 0), vh - photoFrame.h);
+  applyPhotoFrame();
+}
+
+// One finger or the mouse drags; a second finger on the frame turns it into a pinch.
+let photoDrag = null;
+let photoPinch = null;
+const photoPointers = new Map();
+photoFrameEl.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0) return;
+  photoPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  photoFrameEl.setPointerCapture(event.pointerId);
+  event.preventDefault();
+  if (photoPointers.size === 2) {
+    const [a, b] = [...photoPointers.values()];
+    photoDrag = null;
+    photoPinch = { start: Math.max(Math.hypot(a.x - b.x, a.y - b.y), 1), from: { ...photoFrame } };
+    return;
+  }
+  if (photoPointers.size > 2) return;
+  const corner = event.target.dataset ? event.target.dataset.corner : undefined;
+  photoDrag = { corner, startX: event.clientX, startY: event.clientY, from: { ...photoFrame } };
+});
+photoFrameEl.addEventListener("pointermove", (event) => {
+  if (photoPointers.has(event.pointerId)) photoPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  if (photoPinch) {
+    const [a, b] = [...photoPointers.values()];
+    scalePhotoFrame(photoPinch.from, Math.hypot(a.x - b.x, a.y - b.y) / photoPinch.start);
+    return;
+  }
+  if (!photoDrag) return;
+  const { vw, vh } = photoBounds();
+  const { corner, from } = photoDrag;
+  if (!corner) {
+    photoFrame.x = Math.min(Math.max(from.x + event.clientX - photoDrag.startX, 0), vw - from.w);
+    photoFrame.y = Math.min(Math.max(from.y + event.clientY - photoDrag.startY, 0), vh - from.h);
+    applyPhotoFrame();
+    return;
+  }
+  // The corner opposite the one being dragged stays where it is.
+  const sx = corner.includes("e") ? 1 : -1;
+  const sy = corner.includes("s") ? 1 : -1;
+  const ax = sx > 0 ? from.x : from.x + from.w;
+  const ay = sy > 0 ? from.y : from.y + from.h;
+  const dx = Math.max((event.clientX - ax) * sx, 0);
+  const dy = Math.max((event.clientY - ay) * sy, 0);
+  const maxW = sx > 0 ? vw - ax : ax;
+  const maxH = sy > 0 ? vh - ay : ay;
+  const ratio = PHOTO_SHAPES[photoShape];
+  let w;
+  let h;
+  if (ratio === null) {
+    w = Math.min(Math.max(dx, PHOTO_MIN), maxW);
+    h = Math.min(Math.max(dy, PHOTO_MIN), maxH);
+  } else {
+    w = Math.max(dx, dy * ratio);
+    w = Math.max(w, PHOTO_MIN * Math.max(1, ratio));
+    w = Math.min(w, maxW, maxH * ratio);
+    h = w / ratio;
+  }
+  photoFrame.w = w;
+  photoFrame.h = h;
+  photoFrame.x = sx > 0 ? ax : ax - w;
+  photoFrame.y = sy > 0 ? ay : ay - h;
+  applyPhotoFrame();
+});
+const endPhotoDrag = (event) => {
+  photoPointers.delete(event.pointerId);
+  photoDrag = null;
+  // Lifting one finger of a pinch ends it, and the other finger does nothing more.
+  if (photoPointers.size < 2) photoPinch = null;
+};
+photoFrameEl.addEventListener("pointerup", endPhotoDrag);
+photoFrameEl.addEventListener("pointercancel", endPhotoDrag);
+
+// The keyboard: arrows move the frame, Shift with an arrow makes it larger or smaller,
+// and Enter takes the photo.
+photoFrameEl.addEventListener("keydown", (event) => {
+  const { vw, vh } = photoBounds();
+  const step = 10;
+  if (event.key === "Enter") {
+    event.preventDefault();
+    photoShutter.click();
+    return;
+  }
+  const dir = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
+  if (!dir) return;
+  event.preventDefault();
+  if (event.shiftKey) {
+    // Right or down grows the frame and left or up shrinks it.
+    const grow = dir[0] + dir[1];
+    scalePhotoFrame({ ...photoFrame }, 1 + grow * 0.05);
+    return;
+  }
+  photoFrame.x = Math.min(Math.max(photoFrame.x + dir[0] * step, 0), vw - photoFrame.w);
+  photoFrame.y = Math.min(Math.max(photoFrame.y + dir[1] * step, 0), vh - photoFrame.h);
+  applyPhotoFrame();
+});
+
+// The frame sits over the canvas, so pass the scroll wheel on to zoom the view.
+photoFrameEl.addEventListener(
+  "wheel",
+  (event) => {
+    event.preventDefault();
+    renderer.domElement.dispatchEvent(
+      new WheelEvent("wheel", {
+        deltaX: event.deltaX,
+        deltaY: event.deltaY,
+        deltaMode: event.deltaMode,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        ctrlKey: event.ctrlKey,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  },
+  { passive: false },
+);
 
 // Cows: a few wander the open grass beyond the garden, for show only. Each has a
 // patch of lawn of its own, so they never meet or come near the beds, fences or
@@ -3494,5 +3987,8 @@ function animate() {
   updateFigures(now);
   updateWaveRings(now);
   renderer.render(scene, camera);
+  // A photo is taken straight after a frame is drawn, because the canvas is only
+  // readable until the browser has shown it.
+  if (photoRequested) takePhoto();
 }
 animate();

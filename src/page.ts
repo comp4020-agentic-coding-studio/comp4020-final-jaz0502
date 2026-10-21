@@ -72,13 +72,21 @@ export function renderPage(): string {
       </div>
       <div class="you-record-head">
         <p class="panel-label you-label">Your record</p>
-        <button type="button" id="wave-button" aria-label="Wave hello to everyone in the garden">Wave</button>
+        <div class="you-actions">
+          <button type="button" id="camera-button" aria-label="Take a photo of the garden">Camera</button>
+          <button type="button" id="wave-button" aria-label="Wave hello to everyone in the garden">Wave</button>
+        </div>
       </div>
       <dl id="you-counts">
         <div><dt>Planted</dt><dd id="count-planted">0</dd></div>
         <div><dt>Watered</dt><dd id="count-watered">0</dd></div>
         <div><dt>Composted</dt><dd id="count-composted">0</dd></div>
       </dl>
+      <details id="album" class="panel-details">
+        <summary>Album</summary>
+        <p id="album-note" class="panel-help">Photos you take are kept in this browser only. Nobody else sees them.</p>
+        <div id="album-grid" role="list"></div>
+      </details>
     </div>
   </aside>
   </div>
@@ -86,6 +94,46 @@ export function renderPage(): string {
   <button type="button" id="bed-sign" class="bed-sign" hidden>
     <span class="bed-sign-label"></span>
   </button>
+
+  <div id="photo-ui" hidden>
+    <div id="photo-frame" role="group" aria-label="Photo frame" tabindex="0">
+      <span class="photo-handle" data-corner="nw"></span>
+      <span class="photo-handle" data-corner="ne"></span>
+      <span class="photo-handle" data-corner="sw"></span>
+      <span class="photo-handle" data-corner="se"></span>
+    </div>
+    <p id="photo-hint"><span class="hint-long">Drag the frame to move it, drag a corner or pinch to resize it. Drag outside it to turn the view. With the keyboard: arrows move it, Shift and arrows resize it, Enter takes the photo.</span><span class="hint-short">Drag to move, pinch or drag a corner to resize.</span></p>
+    <div id="photo-bar" role="toolbar" aria-label="Photo options">
+      <div id="photo-shapes" role="radiogroup" aria-label="Shape of the photo">
+        <button type="button" role="radio" aria-checked="false" data-shape="free">Free</button>
+        <button type="button" role="radio" aria-checked="true" data-shape="wide">Wide</button>
+        <button type="button" role="radio" aria-checked="false" data-shape="square">Square</button>
+        <button type="button" role="radio" aria-checked="false" data-shape="portrait">Portrait</button>
+      </div>
+      <button type="button" id="photo-shutter" aria-label="Take the photo">Take photo</button>
+      <button type="button" id="photo-close">Close</button>
+    </div>
+    <div id="photo-flash"></div>
+    <div id="photo-preview" role="dialog" aria-label="Your photo" hidden>
+      <img id="photo-preview-img" alt="The photo you just took">
+      <div class="photo-preview-actions">
+        <button type="button" id="photo-retake">Retake</button>
+        <button type="button" id="photo-save">Save to album</button>
+        <button type="button" id="photo-download">Save to device</button>
+        <button type="button" id="photo-done">Done</button>
+      </div>
+      <p id="photo-note" role="status"></p>
+    </div>
+  </div>
+
+  <div id="album-view" role="dialog" aria-label="A photo from your album" hidden>
+    <img id="album-view-img" alt="A photo from your album">
+    <div class="photo-preview-actions">
+      <button type="button" id="album-save">Save to device</button>
+      <button type="button" id="album-delete">Delete</button>
+      <button type="button" id="album-close">Close</button>
+    </div>
+  </div>
 
   <p id="status-bar" role="status" aria-live="polite">Hover a plot to see its status. Click to act.</p>
 

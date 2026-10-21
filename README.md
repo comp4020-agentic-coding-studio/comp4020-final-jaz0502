@@ -10,9 +10,13 @@ There are no accounts. A visitor is a cookie, so one browser is one gardener. Ea
 
 Each gardener also has a private record of what they have planted, watered and composted. It is only a record: nobody else sees it, it is never compared between gardeners, and it has no goals or levels, so it cannot become a score.
 
+Anyone can take a photo of the garden. The camera hides everything else and shows a frame that can be moved and resized and set to a free, wide, square or portrait shape. Photos are kept in an album in that gardener's own browser, up to 24, and nobody else sees them.
+
 ## What I left out
 
 There are no names or profiles chosen by gardeners, because there are no accounts and I did not want free text from strangers. Gardeners are told apart by colour alone, so two can end up with similar colours.
+
+There is no shared gallery of photos. It would mean taking pictures from strangers, and a gallery invites a "best photo" ranking. An album is only ever yours, and it lives in your browser, so it is gone if you clear your site data or switch device.
 
 Figures only walk along the paths and never stand on a plot. Where a figure is, or which bed you are looking at, has no effect on what anyone can do to a plot.
 
@@ -45,6 +49,7 @@ The rest can only be judged by a person:
 - Real-time updates to plots: A change in one browser should appear in the others within about a second. There is no test for this, because proving that a change reaches two independent browsers needs real browsers. I judged it by watching two browsers side by side.
 - Whether it feels like other people are there: how the figures and icons look and read is a matter for a person.
 - How the beds look: each bed's fence, plants and colours are for a person to judge. Nothing about them affects what anyone can do.
+- The camera and album: Photos are taken and kept in the visitor's own browser, so the server never sees one and no test can check it. Whether the frame is easy to move and resize on a laptop and a phone, and whether the album stays private to one browser, is for a person to judge. I judged it by looking at it in my own browser, and the agent drove it in a real browser at laptop and phone widths.
 - The absence of scoring: Nothing in the app keeps score, and that is a design choice rather than something a test can show.
 
 ## What I looked at
