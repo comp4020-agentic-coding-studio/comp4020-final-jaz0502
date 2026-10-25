@@ -135,6 +135,13 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
     return;
   }
 
+  // The handwriting for the journal's headings, served from the repo like
+  // Three.js so the page needs no third party. Its licence sits beside it.
+  if (req.method === "GET" && pathname === "/vendor/fonts/caveat-latin.woff2") {
+    await serveStatic(res, "vendor/fonts/caveat-latin.woff2", "font/woff2");
+    return;
+  }
+
   if (req.method === "GET" && pathname === "/events") {
     subscribe(
       res,

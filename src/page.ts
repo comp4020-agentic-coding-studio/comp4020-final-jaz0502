@@ -11,9 +11,19 @@ export function renderPage(): string {
   <div id="scene-container"></div>
 
   <div id="panels">
-  <aside id="panel" class="panel" aria-label="Garden controls">
+  <aside id="panel" class="panel paper" aria-label="Garden controls">
+    <svg class="sprig" viewBox="0 0 70 46" aria-hidden="true" focusable="false">
+      <path class="vine-stem s2" d="M2 6 C 14 4, 24 14, 36 12 C 46 10, 52 18, 60 16"/>
+      <path class="vine-stem s3" d="M36 12 C 38 22, 34 30, 38 38"/>
+      <path class="vine-tendril" d="M24 11 C 24 20, 32 22, 32 16"/>
+      <path class="sprig-leaf l1" d="M14 8 c -2 -8 -11 -9 -13 -3 c 4 6 10 8 13 3 z"/>
+      <path class="sprig-leaf l2" d="M26 12 c 3 7 11 8 14 2 c -5 -5 -11 -6 -14 -2 z"/>
+      <path class="sprig-leaf l3" d="M48 12 c -1 -8 -9 -10 -13 -5 c 3 6 9 8 13 5 z"/>
+      <path class="sprig-leaf l1" d="M38 30 c 6 -3 11 1 10 6 c -5 2 -10 0 -10 -6 z"/>
+      <use href="#vine-bud" class="bud" transform="translate(38 40) rotate(180) scale(0.8)"/>
+    </svg>
     <div class="panel-header">
-      <h1>Community Garden</h1>
+      <h1 class="paper-title">Community Garden</h1>
       <button type="button" id="panel-toggle" class="panel-toggle" aria-expanded="true" aria-controls="panel-body">Hide</button>
     </div>
     <div id="panel-body" class="panel-body">
@@ -38,17 +48,29 @@ export function renderPage(): string {
         <div id="who-dots"></div>
         <p id="who-count">Just you here</p>
       </div>
+      <div class="panel-footer">
       <details class="panel-details">
         <summary>How it works</summary>
         <p class="panel-help">A shared garden: anyone can plant an empty plot, and anyone can water any plot. Drag to look around and click a plot to act on it. The ring around a plant shows who watered it last, and it pulses when the plant gets thirsty.</p>
       </details>
       <p class="panel-link"><a href="/readme/">About this app</a></p>
+      </div>
     </div>
   </aside>
 
-  <aside id="feed-panel" class="panel" aria-label="Recent activity">
+  <aside id="feed-panel" class="panel paper" aria-label="Recent activity">
+    <svg class="sprig" viewBox="0 0 70 46" aria-hidden="true" focusable="false">
+      <path class="vine-stem s2" d="M2 6 C 14 4, 24 14, 36 12 C 46 10, 52 18, 60 16"/>
+      <path class="vine-stem s3" d="M36 12 C 38 22, 34 30, 38 38"/>
+      <path class="vine-tendril" d="M24 11 C 24 20, 32 22, 32 16"/>
+      <path class="sprig-leaf l1" d="M14 8 c -2 -8 -11 -9 -13 -3 c 4 6 10 8 13 3 z"/>
+      <path class="sprig-leaf l2" d="M26 12 c 3 7 11 8 14 2 c -5 -5 -11 -6 -14 -2 z"/>
+      <path class="sprig-leaf l3" d="M48 12 c -1 -8 -9 -10 -13 -5 c 3 6 9 8 13 5 z"/>
+      <path class="sprig-leaf l1" d="M38 30 c 6 -3 11 1 10 6 c -5 2 -10 0 -10 -6 z"/>
+      <use href="#vine-bud" class="bud" transform="translate(38 40) rotate(180) scale(0.8)"/>
+    </svg>
     <div class="panel-header">
-      <h2>Recent</h2>
+      <h2 class="paper-title">Recent</h2>
       <button type="button" id="feed-toggle" class="panel-toggle" aria-expanded="true" aria-controls="feed-body">Hide</button>
     </div>
     <div id="feed-body" class="panel-body">
@@ -57,33 +79,71 @@ export function renderPage(): string {
     </div>
   </aside>
 
-  <aside id="gardener-panel" class="panel" aria-label="You, the gardener">
+  <aside id="gardener-panel" class="panel paper journal" aria-label="My journal">
+      <svg class="journal-vine" viewBox="0 0 170 96" aria-hidden="true" focusable="false">
+        <defs>
+          <g id="vine-leaf">
+            <path class="leaf-blade" d="M0 0 C 3 -9, 16 -12, 28 -1 C 17 11, 5 9, 0 0 Z"/>
+            <path class="leaf-vein" d="M0 0 L 25 -1 M8 -0.5 L 14 -6 M8 -0.5 L 13 5 M16 -0.8 L 21 -5 M16 -0.8 L 20 3"/>
+          </g>
+          <g id="vine-bud">
+            <path class="bud-petal" d="M0 0 C -3 -4, -1 -9, 0 -10 C 1 -9, 3 -4, 0 0 Z"/>
+            <path class="bud-petal" d="M0 0 C -6 -2, -9 -6, -8 -8 C -6 -8, -2 -5, 0 0 Z"/>
+            <path class="bud-petal" d="M0 0 C 6 -2, 9 -6, 8 -8 C 6 -8, 2 -5, 0 0 Z"/>
+            <circle class="bud-heart" cx="0" cy="-1" r="1.4"/>
+          </g>
+        </defs>
+        <!-- the main stem, thinner towards its tip, and two side shoots -->
+        <path class="vine-stem s1" d="M168 6 C 150 4, 138 16, 122 14 C 108 12, 100 24, 86 24"/>
+        <path class="vine-stem s2" d="M86 24 C 72 24, 66 14, 52 16 C 40 18, 36 30, 24 32"/>
+        <path class="vine-stem s3" d="M24 32 C 14 34, 8 42, 10 52"/>
+        <path class="vine-stem s2" d="M122 14 C 120 28, 130 38, 124 54 C 121 63, 126 70, 122 78"/>
+        <path class="vine-stem s3" d="M86 24 C 84 36, 92 44, 88 56"/>
+        <!-- curling tendrils -->
+        <path class="vine-tendril" d="M138 15 C 142 26, 154 26, 154 18 C 154 12, 146 12, 147 18"/>
+        <path class="vine-tendril" d="M52 16 C 50 6, 40 4, 38 10 C 37 15, 43 16, 44 12"/>
+        <path class="vine-tendril" d="M10 52 C 6 60, 12 68, 18 64 C 21 61, 17 57, 14 59"/>
+        <path class="vine-tendril" d="M104 22 C 110 32, 120 30, 118 24"/>
+        <!-- leaves, each turned and sized a little differently -->
+        <use href="#vine-leaf" class="leaf l1" transform="translate(158 8) rotate(-150) scale(0.95)"/>
+        <use href="#vine-leaf" class="leaf l2" transform="translate(144 12) rotate(55) scale(1.05)"/>
+        <use href="#vine-leaf" class="leaf l3" transform="translate(122 14) rotate(-120) scale(1.1)"/>
+        <use href="#vine-leaf" class="leaf l1" transform="translate(106 21) rotate(60) scale(0.9)"/>
+        <use href="#vine-leaf" class="leaf l2" transform="translate(86 24) rotate(-100) scale(1.15)"/>
+        <use href="#vine-leaf" class="leaf l3" transform="translate(66 16) rotate(40) scale(1)"/>
+        <use href="#vine-leaf" class="leaf l1" transform="translate(52 16) rotate(-130) scale(0.9)"/>
+        <use href="#vine-leaf" class="leaf l2" transform="translate(38 24) rotate(70) scale(1.05)"/>
+        <use href="#vine-leaf" class="leaf l3" transform="translate(24 32) rotate(-140) scale(0.95)"/>
+        <use href="#vine-leaf" class="leaf l1" transform="translate(126 44) rotate(25) scale(0.9)"/>
+        <use href="#vine-leaf" class="leaf l2" transform="translate(124 62) rotate(150) scale(0.85)"/>
+        <use href="#vine-leaf" class="leaf l3" transform="translate(88 44) rotate(160) scale(0.85)"/>
+        <use href="#vine-leaf" class="leaf l2" transform="translate(9 50) rotate(110) scale(0.8)"/>
+        <!-- small blossoms and a berry or two -->
+        <use href="#vine-bud" class="bud" transform="translate(122 80) rotate(180) scale(1)"/>
+        <use href="#vine-bud" class="bud" transform="translate(88 58) rotate(180) scale(0.85)"/>
+        <use href="#vine-bud" class="bud" transform="translate(94 20) rotate(30) scale(0.8)"/>
+        <circle class="vine-berry" cx="136" cy="30" r="2.2"/>
+        <circle class="vine-berry" cx="140" cy="34" r="1.9"/>
+        <path class="vine-sparkle" d="M60 42 l 1.2 3.6 l 3.6 1.2 l -3.6 1.2 l -1.2 3.6 l -1.2 -3.6 l -3.6 -1.2 l 3.6 -1.2 z"/>
+        <path class="vine-sparkle vine-sparkle-late" d="M150 44 l 1 3 l 3 1 l -3 1 l -1 3 l -1 -3 l -3 -1 l 3 -1 z"/>
+      </svg>
     <div class="panel-header">
-      <h2>You</h2>
+      <h2 class="paper-title"><span id="you-chip" class="you-chip"></span>My journal</h2>
       <button type="button" id="gardener-toggle" class="panel-toggle" aria-expanded="true" aria-controls="gardener-body">Hide</button>
     </div>
     <div id="gardener-body" class="panel-body">
-      <div class="you-row">
-        <span id="you-chip" class="you-chip"></span>
-        <div>
-          <p class="you-name">Gardener</p>
-          <p id="you-since" class="you-since">Your record starts with your first action</p>
-        </div>
+      <p id="you-since" class="you-since">Your record starts with your first action</p>
+      <div class="you-actions">
+        <button type="button" id="camera-button" class="journal-action" aria-label="Take a photo of the garden"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 8h3l1.6-2.2h6.8L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.2" r="3.6"/></svg><span>Camera</span></button>
+        <button type="button" id="wave-button" class="journal-action" aria-label="Wave hello to everyone in the garden"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 13V6.5a1.5 1.5 0 0 1 3 0V12"/><path d="M11 11V5a1.5 1.5 0 0 1 3 0v6"/><path d="M14 11V6.5a1.5 1.5 0 0 1 3 0V14c0 4-2.6 6.5-6.2 6.5-2.6 0-4.2-1.4-5.4-3.4L3.8 14.3a1.4 1.4 0 0 1 2.3-1.5L8 15"/><path d="M19.5 4.5c.9.7 1.5 1.7 1.6 2.8"/></svg><span>Wave</span></button>
       </div>
-      <div class="you-record-head">
-        <p class="panel-label you-label">Your record</p>
-        <div class="you-actions">
-          <button type="button" id="camera-button" aria-label="Take a photo of the garden">Camera</button>
-          <button type="button" id="wave-button" aria-label="Wave hello to everyone in the garden">Wave</button>
-        </div>
-      </div>
-      <dl id="you-counts">
-        <div><dt>Planted</dt><dd id="count-planted">0</dd></div>
-        <div><dt>Watered</dt><dd id="count-watered">0</dd></div>
-        <div><dt>Composted</dt><dd id="count-composted">0</dd></div>
-      </dl>
-      <details id="album" class="panel-details">
-        <summary>Album</summary>
+      <h3 class="paper-heading">My record</h3>
+      <!-- A plain record, private to you: one line, no tiles, totals or goals. -->
+      <p id="you-counts" class="you-counts">
+        <span>Planted <b id="count-planted">0</b></span><span class="dot" aria-hidden="true"> · </span><span>Watered <b id="count-watered">0</b></span><span class="dot" aria-hidden="true"> · </span><span>Composted <b id="count-composted">0</b></span>
+      </p>
+      <details id="album" class="journal-album">
+        <summary class="album-tab"><svg class="album-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="4.5" width="18" height="15" rx="1.5"/><circle cx="8.5" cy="9.5" r="1.7"/><path d="M3.5 17l5-5 3.5 3.5 3-3 5.5 5"/></svg><span>Album</span></summary>
         <p id="album-note" class="panel-help">Photos you take are kept in this browser only. Nobody else sees them.</p>
         <div id="album-grid" role="list"></div>
       </details>
@@ -133,6 +193,12 @@ export function renderPage(): string {
       <button type="button" id="album-delete">Delete</button>
       <button type="button" id="album-close">Close</button>
     </div>
+  </div>
+
+  <!-- On a phone the journal starts closed, so its two actions also float in reach. -->
+  <div id="quick-actions">
+    <button type="button" id="quick-camera" class="quick-action" aria-label="Take a photo of the garden"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 8h3l1.6-2.2h6.8L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.2" r="3.6"/></svg></button>
+    <button type="button" id="quick-wave" class="quick-action" aria-label="Wave hello to everyone in the garden"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 13V6.5a1.5 1.5 0 0 1 3 0V12"/><path d="M11 11V5a1.5 1.5 0 0 1 3 0v6"/><path d="M14 11V6.5a1.5 1.5 0 0 1 3 0V14c0 4-2.6 6.5-6.2 6.5-2.6 0-4.2-1.4-5.4-3.4L3.8 14.3a1.4 1.4 0 0 1 2.3-1.5L8 15"/><path d="M19.5 4.5c.9.7 1.5 1.7 1.6 2.8"/></svg></button>
   </div>
 
   <p id="status-bar" role="status" aria-live="polite">Hover a plot to see its status. Click to act.</p>

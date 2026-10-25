@@ -2183,11 +2183,6 @@ const bedHere = document.getElementById("bed-here");
 function renderBedHere() {
   const { name, takes } = beds[currentBed];
   bedHere.replaceChildren(document.createTextNode(`You are in ${name}`));
-  if (takes !== null) {
-    const small = document.createElement("small");
-    small.textContent = `Takes ${takes.map((type) => PLANT_NAME[type].toLowerCase()).join(" and ")}`;
-    bedHere.append(small);
-  }
   for (const button of pickerButtons) {
     button.hidden = takes !== null && !takes.includes(button.dataset.type);
     button.setAttribute("aria-checked", String(button.dataset.type === plantHere()));
@@ -2594,7 +2589,7 @@ function renderStats(stats) {
 
 // The recent list: the last few things gardeners did, newest first. The server
 // keeps and sends it; this only draws it. It shows no counts and no totals.
-const FEED_LENGTH = 4;
+const FEED_LENGTH = 3;
 const feedList = document.getElementById("feed-list");
 const feedEmpty = document.getElementById("feed-empty");
 let feed = [];
@@ -2668,14 +2663,24 @@ connect();
 
 // The Wave button. The server drops a wave sent too soon after the last, so grey
 // the button out for about as long, and let the event, not the reply, show it.
+// It reads "Waved" for that time, so a click is seen to have done something.
 const waveButton = document.getElementById("wave-button");
-waveButton.addEventListener("click", () => {
+const waveLabel = waveButton.querySelector("span");
+const quickWave = document.getElementById("quick-wave");
+function wave() {
+  if (waveButton.disabled) return;
   waveButton.disabled = true;
+  quickWave.disabled = true;
+  waveLabel.textContent = "Waved";
   setTimeout(() => {
     waveButton.disabled = false;
+    quickWave.disabled = false;
+    waveLabel.textContent = "Wave";
   }, 1500);
   fetch("/api/wave", { method: "POST" }).catch(() => {});
-});
+}
+waveButton.addEventListener("click", wave);
+quickWave.addEventListener("click", wave);
 
 const raycaster = new THREE.Raycaster();
 const GROUND_PLANE = new THREE.Plane(new THREE.Vector3(0, 1, 0), -GROUND_Y);
@@ -2955,7 +2960,8 @@ function closePhotoMode() {
   document.body.classList.remove("photo-mode");
   photoUi.hidden = true;
   updateViewOffset();
-  cameraButton.focus({ preventScroll: true });
+  // Back to whichever button opened it: the journal's, or the floating one on a phone.
+  (photoOpener && photoOpener.isConnected && photoOpener.offsetParent !== null ? photoOpener : cameraButton).focus({ preventScroll: true });
 }
 
 // Taking the photo: copy the part of the canvas inside the frame into a smaller
@@ -3215,7 +3221,13 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closeAlbumView();
 });
 
-cameraButton.addEventListener("click", openPhotoMode);
+let photoOpener = null;
+for (const button of [cameraButton, document.getElementById("quick-camera")]) {
+  button.addEventListener("click", () => {
+    photoOpener = button;
+    openPhotoMode();
+  });
+}
 document.getElementById("photo-close").addEventListener("click", closePhotoMode);
 document.getElementById("photo-done").addEventListener("click", closePhotoMode);
 document.addEventListener("keydown", (event) => {
