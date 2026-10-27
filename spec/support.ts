@@ -17,7 +17,7 @@ export const sleep = (ms: number): Promise<void> => new Promise((resolve) => set
 // connection and curl don't, so it's the client, not the app). That wrecks
 // specs that wait out a wilt window, so every request here asks for a fresh
 // connection.
-const fresh = { connection: "close" };
+export const fresh = { connection: "close" };
 
 export interface PrivateApp {
   url: string;

@@ -401,8 +401,8 @@ body {
 .you-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0.5rem;
-  margin: 0.8rem 0 0.2rem;
+  gap: 0.4rem;
+  margin: 0.6rem 0 0.1rem;
 }
 
 .journal-action {
@@ -411,9 +411,9 @@ body {
   justify-content: center;
   gap: 0.45rem;
   font: inherit;
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   font-weight: 600;
-  padding: 0.5rem 0.6rem;
+  padding: 0.28rem 0.6rem;
   border: 1px solid #4a6638;
   border-radius: 999px;
   background: var(--moss);
@@ -467,6 +467,11 @@ body {
 
 .you-counts .dot {
   color: var(--sage);
+}
+
+.you-seeds .seeds-label {
+  color: var(--moss);
+  font-weight: 600;
 }
 
 /* The album is a tab on the page: a framed label with a picture icon, so it can be
@@ -821,6 +826,216 @@ body {
   text-align: center;
 }
 
+/* "My garden" takes the whole row under Camera and Wave, in a warmer brown so it
+   reads as a place to go rather than something to do. */
+.you-actions .own-action {
+  grid-column: 1 / -1;
+  background: #8a5a2b;
+  box-shadow: 0 2px 0 #5e3c1a;
+}
+
+.you-actions .own-action:hover,
+.you-actions .own-action:focus-visible {
+  background: #774b22;
+}
+
+/* Your own garden's bar: a slip of the same paper, top centre, with your seeds. */
+#own-bar {
+  position: fixed;
+  z-index: 3;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(30rem, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: 0.6rem 1rem 0.8rem;
+  color: #3b2c1a;
+  background: #ebdcb2;
+  border: 1px solid #a98a55;
+  border-radius: 5px 13px 7px 15px / 13px 6px 15px 5px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25), inset 0 0 26px rgba(150, 100, 40, 0.38);
+}
+
+#own-bar[hidden] {
+  display: none;
+}
+
+.own-bar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+#own-bar .paper-title {
+  margin: 0;
+  font-size: 1.9rem;
+}
+
+#own-back {
+  padding: 0.4rem 0.9rem;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #fff;
+  background: #4a6a35;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: 0 2px 0 #2f4721;
+  cursor: pointer;
+}
+
+#own-back:hover,
+#own-back:focus-visible {
+  background: #3b5529;
+}
+
+.own-note {
+  margin: 0.2rem 0 0.4rem;
+  font-size: 0.85rem;
+  font-style: italic;
+  color: #5e4a2c;
+}
+
+#own-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+#own-picker button {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.7rem;
+  font-family: "Caveat", "Segoe Print", "Bradley Hand", cursive;
+  font-size: 1.25rem;
+  color: #3b2c1a;
+  background: #f7ecd0;
+  border: 1px solid #b89a63;
+  border-radius: 6px;
+  box-shadow: 0 2px 0 rgba(120, 88, 45, 0.35);
+  cursor: pointer;
+}
+
+#own-picker button b {
+  font-family: system-ui, sans-serif;
+  font-size: 0.85rem;
+}
+
+#own-picker button[aria-checked="true"] {
+  color: #fff;
+  background: #4a6a35;
+  border-color: #2f4721;
+}
+
+/* In your own garden the shared garden's panels step aside; your journal stays. */
+body.own-mode #panel,
+body.own-mode #feed-panel,
+body.own-mode .bed-sign {
+  display: none !important;
+}
+
+body.photo-mode #own-bar {
+  display: none !important;
+}
+
+/* On a phone the bar is a small strip, so the garden stays in view. */
+@media (max-width: 700px) {
+  #own-bar {
+    top: 10px;
+    padding: 0.4rem 0.7rem 0.55rem;
+  }
+
+  #own-bar .paper-title {
+    font-size: 1.5rem;
+    white-space: nowrap;
+  }
+
+  #own-back {
+    padding: 0.35rem 0.75rem;
+    font-size: 0.8rem;
+  }
+
+  .own-back-long {
+    display: none;
+  }
+
+  #own-bar .own-note:first-of-type {
+    display: none;
+  }
+
+  .own-note {
+    font-size: 0.8rem;
+  }
+}
+
+/* What to do with a fully grown plant, a slip of paper just above the status line. */
+#plot-choice {
+  position: fixed;
+  z-index: 3;
+  bottom: 64px;
+  left: 50%;
+  transform: translateX(-50%) rotate(-0.6deg);
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
+  padding: 0.55rem 0.9rem 0.7rem;
+  color: #3b2c1a;
+  background: #f3e6c2;
+  border: 1px solid #a98a55;
+  border-radius: 5px 11px 6px 12px / 11px 5px 12px 5px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28), inset 0 0 18px rgba(150, 100, 40, 0.3);
+  text-align: center;
+}
+
+#plot-choice-label {
+  margin: 0 0 0.45rem;
+  font-family: "Caveat", "Segoe Print", "Bradley Hand", cursive;
+  font-size: 1.4rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: #4a6a35;
+}
+
+.plot-choice-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.45rem;
+}
+
+.plot-choice-buttons button {
+  padding: 0.4rem 0.95rem;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #fff;
+  background: #4a6a35;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: 0 2px 0 #2f4721;
+  cursor: pointer;
+}
+
+.plot-choice-buttons button:hover,
+.plot-choice-buttons button:focus-visible {
+  background: #3b5529;
+}
+
+.plot-choice-buttons .choice-cancel {
+  color: #5e4a2c;
+  background: transparent;
+  box-shadow: none;
+  text-decoration: underline dashed #a98a55;
+  text-underline-offset: 3px;
+}
+
+.plot-choice-buttons .choice-cancel:hover,
+.plot-choice-buttons .choice-cancel:focus-visible {
+  color: #4a6a35;
+  background: transparent;
+}
+
 /* A small sign floating over the bed you aren't at, inviting you over. It follows
    the bed on screen; hovering the bed or the sign makes it stand out. */
 .bed-sign {
@@ -920,6 +1135,7 @@ body.album-open #panels {
 body.photo-mode #panels,
 body.photo-mode #quick-actions,
 body.photo-mode #status-bar,
+body.photo-mode #plot-choice,
 body.photo-mode .bed-sign {
   display: none !important;
 }

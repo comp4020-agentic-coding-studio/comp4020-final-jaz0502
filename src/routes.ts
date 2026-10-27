@@ -8,7 +8,7 @@ import { logEvent } from "./log.ts";
 import { renderPage } from "./page.ts";
 import { move as moveGardener, wave as waveGardener } from "./presence.ts";
 import { renderReadme } from "./readme.ts";
-import { broadcastActivity, broadcastPresenceUpdate, broadcastUpdate, broadcastWave, sendStats, subscribe } from "./realtime.ts";
+import { broadcastActivity, broadcastPresenceUpdate, broadcastUpdate, broadcastWave, sendOwnUpdate, sendSeeds, sendStats, subscribe } from "./realtime.ts";
 import { serveStatic } from "./static.ts";
 import type { PlantType, Plot } from "./types.ts";
 
@@ -40,6 +40,19 @@ function toPublic(plot: Plot): Plot {
     plantedBy: plot.plantedBy === null ? null : publicId(plot.plantedBy),
     lastWateredBy: plot.lastWateredBy === null ? null : publicId(plot.lastWateredBy),
   };
+}
+
+// A gardener's own garden as it stands now, or null if they have none yet. Own
+// plots carry no names, so there is nothing to make public.
+export function derivedOwnPlots(owner: string): Plot[] | null {
+  if (!db.hasOwnGarden(owner)) return null;
+  const now = Date.now();
+  return db.listOwnPlots(owner).map((plot) => derivePlot(plot, now));
+}
+
+function ownPlotsNow(owner: string): Plot[] {
+  const now = Date.now();
+  return db.listOwnPlots(owner).map((plot) => derivePlot(plot, now));
 }
 
 export function derivedPlots(): Plot[] {
@@ -90,6 +103,27 @@ function refusalReason(position: number, action: "plant" | "water" | "compost"):
 }
 
 const ACTION_PATTERN =/^\/api\/plots\/(\d+)\/(plant|water|compost)$/;
+const GATHER_PATTERN = /^\/api\/plots\/(\d+)\/gather$/;
+// Your own garden. There is no way to name anyone else's: whose garden it is comes
+// from the cookie alone.
+const OWN_PATTERN = /^\/api\/own-garden\/(\d+)\/(plant|water|compost)$/;
+
+const OWN_REFUSALS: Record<string, string> = {
+  "unknown-type": "Unknown plant type",
+  "no-seeds": "You have no seeds of that kind. Gather some from a fully grown plant.",
+  "not-empty": "Something is already growing there.",
+  empty: "There is nothing there to water.",
+  wilted: "This plant has wilted. Compost it first.",
+  "not-wilted": "Only a wilted plant can be composted.",
+  "too-many-gardeners": "The garden can't keep any more gardens just now.",
+};
+
+const GATHER_REFUSALS: Record<string, string> = {
+  "not-mature": "Only a fully grown plant has seeds to gather.",
+  "already-gathered": "You have already gathered seeds from this plant.",
+  "seeds-full": "You have as many of these seeds as you can carry.",
+  "too-many-gardeners": "The garden can't keep any more seeds just now.",
+};
 
 export async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const identity = getOrSetIdentity(req, res);
@@ -155,6 +189,8 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
       },
       publicId(identity),
       db.getStats(publicId(identity)),
+      db.getSeeds(publicId(identity)),
+      ownPlotsNow(publicId(identity)),
     );
     return;
   }
@@ -201,6 +237,99 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
     broadcastWave(id);
     res.writeHead(204);
     res.end();
+    return;
+  }
+
+  // Gathering seeds reads a fully grown plant and changes nothing in the shared
+  // garden: only the gatherer's own seeds change, and only they are told. So it is
+  // never broadcast and never in Recent. It counts against the same limit.
+  const gatherMatch = pathname.match(GATHER_PATTERN);
+  if (req.method === "POST" && gatherMatch) {
+    const position = Number(gatherMatch[1]);
+    const who = publicId(identity);
+    const limit = allowAction(who, Date.now());
+    if (!limit.ok) {
+      if (limit.firstRefusal) logEvent(who, "gather", { plot: position, result: "refused", reason: "rate-limited" });
+      res.writeHead(429, {
+        "content-type": "application/json",
+        "retry-after": String(Math.max(1, Math.ceil(limit.retryAfterMs / 1000))),
+      });
+      res.end(JSON.stringify({ error: "Slow down: too many actions, try again in a few seconds" }));
+      return;
+    }
+
+    const stored = db.getPlot(position);
+    const plot = stored ? derivePlot(stored, Date.now()) : undefined;
+    const result =
+      !plot || plot.state !== "mature" || plot.plantType === null || plot.plantedAt === null
+        ? ({ ok: false, reason: plot ? "not-mature" : "no-such-plot" } as const)
+        : db.gatherSeeds(who, position, plot.plantedAt, plot.plantType);
+
+    if (result.ok) {
+      logEvent(who, "gather", { plot: position, type: plot!.plantType!, seeds: result.gained, result: "ok" });
+      sendSeeds(who, result.seeds);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ type: plot!.plantType, gained: result.gained }));
+    } else {
+      logEvent(who, "gather", { plot: position, result: "refused", reason: result.reason });
+      res.writeHead(result.reason === "no-such-plot" ? 404 : 409, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: GATHER_REFUSALS[result.reason] ?? "There is no plot there." }));
+    }
+    return;
+  }
+
+  // Planting, watering and composting in your own garden. The same rules as the
+  // shared garden, but only you can act here, a seed is used for each plant, and
+  // only you are told: never broadcast, never in Recent and not in your record.
+  const ownMatch = pathname.match(OWN_PATTERN);
+  if (req.method === "POST" && ownMatch) {
+    const position = Number(ownMatch[1]);
+    const action = ownMatch[2] as "plant" | "water" | "compost";
+    const who = publicId(identity);
+    const limit = allowAction(who, Date.now());
+    if (!limit.ok) {
+      if (limit.firstRefusal) logEvent(who, action, { garden: "own", plot: position, result: "refused", reason: "rate-limited" });
+      res.writeHead(429, {
+        "content-type": "application/json",
+        "retry-after": String(Math.max(1, Math.ceil(limit.retryAfterMs / 1000))),
+      });
+      res.end(JSON.stringify({ error: "Slow down: too many actions, try again in a few seconds" }));
+      return;
+    }
+
+    const refuse = (status: number, reason: string, type?: PlantType) => {
+      logEvent(who, action, { garden: "own", plot: position, ...(type ? { type } : {}), result: "refused", reason });
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: OWN_REFUSALS[reason] ?? "There is no plot there." }));
+    };
+
+    const stored = db.getOwnPlot(who, position);
+    if (!stored) return refuse(404, "no-such-plot");
+    const plot = derivePlot(stored, Date.now());
+
+    let plantType: PlantType | undefined;
+    if (action === "plant") {
+      const body = await readJsonBody(req);
+      const requested = typeof body === "object" && body !== null ? (body as { type?: unknown }).type : undefined;
+      if (!isPlantType(requested)) return refuse(400, "unknown-type");
+      plantType = requested;
+      if (plot.state !== "empty") return refuse(409, "not-empty", plantType);
+      const planted = db.plantOwn(who, position, plantType);
+      if (!planted.ok) return refuse(409, planted.reason, plantType);
+      sendSeeds(who, db.getSeeds(who));
+    } else if (action === "water") {
+      if (plot.state === "empty" || plot.state === "wilted") return refuse(409, plot.state);
+      db.waterOwn(who, position);
+    } else {
+      if (plot.state !== "wilted") return refuse(409, "not-wilted");
+      db.compostOwn(who, position);
+    }
+
+    const updated = derivePlot(db.getOwnPlot(who, position)!, Date.now());
+    logEvent(who, action, { garden: "own", plot: position, ...(plantType ? { type: plantType } : {}), result: "ok" });
+    sendOwnUpdate(who, updated);
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(updated));
     return;
   }
 

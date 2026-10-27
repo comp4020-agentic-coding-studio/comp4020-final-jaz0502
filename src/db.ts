@@ -172,3 +172,184 @@ export function recordAction(id: string, action: "plant" | "water" | "compost", 
   bumpStmts[action].run(id);
   return getStats(id);
 }
+
+// Seeds a gardener has gathered from fully grown plants, for their own garden. Like
+// the record, they are keyed by the public id, never the cookie, and go to that
+// gardener alone. They are what you can plant, not a collection: no totals are
+// kept, and a gardener holds at most SEED_CAP of each kind. `gathered` remembers
+// which plants someone has already gathered from (a plant is its plot and when it
+// was planted), so one plant gives seeds to each gardener once in its life.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS seeds (
+    owner      TEXT    NOT NULL,
+    plant_type TEXT    NOT NULL,
+    count      INTEGER NOT NULL,
+    PRIMARY KEY (owner, plant_type)
+  );
+  CREATE TABLE IF NOT EXISTS gathered (
+    owner      TEXT    NOT NULL,
+    position   INTEGER NOT NULL,
+    planted_at INTEGER NOT NULL,
+    PRIMARY KEY (owner, position, planted_at)
+  );
+`);
+
+export const SEEDS_PER_GATHER = 3;
+export const SEED_CAP = 6;
+
+// Only this many gardeners can keep seeds, so a stranger minting cookies can't grow
+// the database without limit.
+const MAX_SEED_KEEPERS = Number(process.env.MAX_SEED_KEEPERS ?? 2000);
+
+export type Seeds = Partial<Record<PlantType, number>>;
+
+const seedsStmt = db.prepare("SELECT plant_type, count FROM seeds WHERE owner = ? AND count > 0 ORDER BY plant_type");
+const seedCountStmt = db.prepare("SELECT count FROM seeds WHERE owner = ? AND plant_type = ?");
+const keepersStmt = db.prepare("SELECT COUNT(DISTINCT owner) AS n FROM seeds");
+const keepsStmt = db.prepare("SELECT 1 FROM seeds WHERE owner = ? LIMIT 1");
+const setSeedsStmt = db.prepare(`
+  INSERT INTO seeds (owner, plant_type, count) VALUES (?, ?, ?)
+  ON CONFLICT (owner, plant_type) DO UPDATE SET count = excluded.count
+`);
+const gatheredStmt = db.prepare("SELECT 1 FROM gathered WHERE owner = ? AND position = ? AND planted_at = ?");
+const markGatheredStmt = db.prepare("INSERT OR IGNORE INTO gathered (owner, position, planted_at) VALUES (?, ?, ?)");
+// A plant that has been composted can never be gathered from again, so its rows
+// are of no more use.
+const forgetGatheredStmt = db.prepare("DELETE FROM gathered WHERE position = ? AND planted_at <> ?");
+
+export function getSeeds(owner: string): Seeds {
+  const seeds: Seeds = {};
+  for (const row of seedsStmt.all(owner) as unknown as { plant_type: PlantType; count: number }[]) {
+    seeds[row.plant_type] = row.count;
+  }
+  return seeds;
+}
+
+export type GatherResult =
+  | { ok: true; seeds: Seeds; gained: number }
+  | { ok: false; reason: "already-gathered" | "seeds-full" | "too-many-gardeners" };
+
+// Takes seeds from a plant without touching it: only the gatherer's own rows change.
+// The caller has already checked that the plant is fully grown.
+export function gatherSeeds(owner: string, position: number, plantedAt: number, plantType: PlantType): GatherResult {
+  if (gatheredStmt.get(owner, position, plantedAt)) return { ok: false, reason: "already-gathered" };
+  const held = (seedCountStmt.get(owner, plantType) as unknown as { count: number } | undefined)?.count ?? 0;
+  if (held >= SEED_CAP) return { ok: false, reason: "seeds-full" };
+  if (!keepsStmt.get(owner)) {
+    const { n } = keepersStmt.get() as unknown as { n: number };
+    if (n >= MAX_SEED_KEEPERS) return { ok: false, reason: "too-many-gardeners" };
+  }
+  const gained = Math.min(SEEDS_PER_GATHER, SEED_CAP - held);
+  forgetGatheredStmt.run(position, plantedAt);
+  markGatheredStmt.run(owner, position, plantedAt);
+  setSeedsStmt.run(owner, plantType, held + gained);
+  return { ok: true, seeds: getSeeds(owner), gained };
+}
+
+// Each gardener's own garden: a few plots only they can plant, water and compost,
+// grown from the seeds they have gathered. Stored by the owner's public id, never
+// the cookie, and sent to their own streams alone. Like the shared garden, only
+// 'empty' or 'planted' is stored and every stage is derived from the timestamps.
+// A row appears only when someone first plants, so an empty garden takes no room.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS own_plots (
+    owner           TEXT    NOT NULL,
+    position        INTEGER NOT NULL,
+    state           TEXT    NOT NULL DEFAULT 'empty' CHECK (state IN ('empty', 'planted')),
+    plant_type      TEXT,
+    planted_at      INTEGER,
+    last_watered_at INTEGER,
+    PRIMARY KEY (owner, position)
+  );
+`);
+
+export const OWN_GARDEN_SIZE = 16;
+
+// Only this many gardeners can have a garden of their own.
+const MAX_OWN_GARDENS = Number(process.env.MAX_OWN_GARDENS ?? 2000);
+
+interface OwnRow {
+  position: number;
+  state: "empty" | "planted";
+  plant_type: PlantType | null;
+  planted_at: number | null;
+  last_watered_at: number | null;
+}
+
+// The owner is never put in the plot: whose garden it is is never sent anywhere,
+// and the page knows it is its own.
+function ownRowToPlot(row: OwnRow): Plot {
+  return {
+    position: row.position,
+    state: row.state,
+    plantType: row.state === "empty" ? null : row.plant_type,
+    plantedAt: row.planted_at,
+    plantedBy: null,
+    lastWateredAt: row.last_watered_at,
+    lastWateredBy: null,
+  };
+}
+
+const ownListStmt = db.prepare("SELECT * FROM own_plots WHERE owner = ?");
+const ownGetStmt = db.prepare("SELECT * FROM own_plots WHERE owner = ? AND position = ?");
+const ownHasStmt = db.prepare("SELECT 1 FROM own_plots WHERE owner = ? LIMIT 1");
+const ownCountStmt = db.prepare("SELECT COUNT(DISTINCT owner) AS n FROM own_plots");
+const ownPlantStmt = db.prepare(`
+  INSERT INTO own_plots (owner, position, state, plant_type, planted_at, last_watered_at)
+  VALUES (?, ?, 'planted', ?, ?, ?)
+  ON CONFLICT (owner, position) DO UPDATE
+    SET state = 'planted', plant_type = excluded.plant_type, planted_at = excluded.planted_at,
+        last_watered_at = excluded.last_watered_at
+    WHERE own_plots.state = 'empty'
+`);
+const ownWaterStmt = db.prepare("UPDATE own_plots SET last_watered_at = ? WHERE owner = ? AND position = ?");
+const ownCompostStmt = db.prepare(`
+  UPDATE own_plots SET state = 'empty', plant_type = NULL, planted_at = NULL, last_watered_at = NULL
+  WHERE owner = ? AND position = ?
+`);
+const useSeedStmt = db.prepare("UPDATE seeds SET count = count - 1 WHERE owner = ? AND plant_type = ? AND count > 0");
+
+// All of a gardener's own plots, in order, with the empty ones filled in.
+export function listOwnPlots(owner: string): Plot[] {
+  const rows = new Map((ownListStmt.all(owner) as unknown as OwnRow[]).map((row) => [row.position, row]));
+  return Array.from({ length: OWN_GARDEN_SIZE }, (_, position) => {
+    const row = rows.get(position);
+    return row ? ownRowToPlot(row) : { position, state: "empty", plantType: null, plantedAt: null, plantedBy: null, lastWateredAt: null, lastWateredBy: null };
+  });
+}
+
+export function getOwnPlot(owner: string, position: number): Plot | undefined {
+  if (!Number.isInteger(position) || position < 0 || position >= OWN_GARDEN_SIZE) return undefined;
+  return listOwnPlots(owner)[position];
+}
+
+export type OwnPlantResult = { ok: true } | { ok: false; reason: "no-seeds" | "not-empty" | "too-many-gardeners" };
+
+// Plants one of the owner's seeds. The caller has checked the plot is empty once
+// derived; the guard in the statement keeps it so.
+export function plantOwn(owner: string, position: number, plantType: PlantType): OwnPlantResult {
+  if (!ownHasStmt.get(owner)) {
+    const { n } = ownCountStmt.get() as unknown as { n: number };
+    if (n >= MAX_OWN_GARDENS) return { ok: false, reason: "too-many-gardeners" };
+  }
+  const held = (seedCountStmt.get(owner, plantType) as unknown as { count: number } | undefined)?.count ?? 0;
+  if (held < 1) return { ok: false, reason: "no-seeds" };
+  const now = Date.now();
+  if (ownPlantStmt.run(owner, position, plantType, now, now).changes === 0) return { ok: false, reason: "not-empty" };
+  useSeedStmt.run(owner, plantType);
+  return { ok: true };
+}
+
+export function waterOwn(owner: string, position: number): void {
+  ownWaterStmt.run(Date.now(), owner, position);
+}
+
+export function compostOwn(owner: string, position: number): void {
+  ownCompostStmt.run(owner, position);
+}
+
+// Whether this gardener has a garden of their own yet, so the sweep can skip the
+// many who don't.
+export function hasOwnGarden(owner: string): boolean {
+  return Boolean(ownHasStmt.get(owner));
+}

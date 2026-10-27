@@ -1,6 +1,6 @@
 import type { ServerResponse } from "node:http";
 import { type Activity, recentActivity } from "./activity.ts";
-import type { GardenerStats } from "./db.ts";
+import type { GardenerStats, Seeds } from "./db.ts";
 import { logEvent } from "./log.ts";
 import { type Gardener, connect, disconnect, listGardeners } from "./presence.ts";
 import type { PlantType, Plot, PlotState } from "./types.ts";
@@ -32,6 +32,13 @@ type SseEvent =
   // Your own record of what you have done. Sent to that gardener's streams only,
   // never broadcast: nobody else is ever shown your counts.
   | { type: "stats"; stats: GardenerStats }
+  // The seeds you have gathered for your own garden. Like the record, sent to your
+  // own streams only.
+  | { type: "seeds"; seeds: Seeds }
+  // Your own garden's plots: all of them on connect, then each one that changes.
+  // Sent to your own streams only, and nobody else is ever told about it.
+  | { type: "own-garden"; plots: Plot[] }
+  | { type: "own-update"; plot: Plot }
   // What gardeners have just done: the short recent list once on connect, then each
   // new action as it happens. Public ids only.
   | { type: "feed"; feed: Activity[] }
@@ -54,6 +61,9 @@ const gardenerOf = new Map<ServerResponse, string>();
 // time anyone was told, instead of re-sending all 25 every tick.
 const lastKnownState = new Map<number, PlotState>();
 
+// The same for each connected gardener's own garden, keyed by "owner:position".
+const ownKnownState = new Map<string, PlotState>();
+
 function payloadOf(event: SseEvent): unknown {
   switch (event.type) {
     case "hello":
@@ -72,6 +82,12 @@ function payloadOf(event: SseEvent): unknown {
       return { id: event.id };
     case "stats":
       return event.stats;
+    case "seeds":
+      return event.seeds;
+    case "own-garden":
+      return event.plots;
+    case "own-update":
+      return event.plot;
     case "feed":
       return event.feed;
     case "activity":
@@ -98,6 +114,8 @@ export function subscribe(
   hello: Hello,
   gardenerId: string,
   stats: GardenerStats,
+  seeds: Seeds,
+  ownPlots: Plot[],
 ): void {
   res.writeHead(200, {
     "content-type": "text/event-stream",
@@ -121,12 +139,16 @@ export function subscribe(
   write(res, { type: "snapshot", plots: initialSnapshot });
   write(res, { type: "presence", gardeners: listGardeners() });
   write(res, { type: "stats", stats });
+  write(res, { type: "seeds", seeds });
+  write(res, { type: "own-garden", plots: ownPlots });
+  for (const plot of ownPlots) ownKnownState.set(`${gardenerId}:${plot.position}`, plot.state);
   write(res, { type: "feed", feed: recentActivity() });
 
   res.on("close", () => {
     clients.delete(res);
     gardenerOf.delete(res);
     if (disconnect(gardenerId)) {
+      for (const key of ownKnownState.keys()) if (key.startsWith(`${gardenerId}:`)) ownKnownState.delete(key);
       broadcast({ type: "presence-leave", id: gardenerId });
       logEvent(gardenerId, "leave", { gardeners: listGardeners().length });
     }
@@ -150,6 +172,21 @@ export function sendStats(gardenerId: string, stats: GardenerStats): void {
   }
 }
 
+// Send a gardener their seeds, to their own streams and no one else's.
+export function sendSeeds(gardenerId: string, seeds: Seeds): void {
+  for (const [res, id] of gardenerOf) {
+    if (id === gardenerId) write(res, { type: "seeds", seeds });
+  }
+}
+
+// Send one of a gardener's own plots to their own streams, and no one else's.
+export function sendOwnUpdate(gardenerId: string, plot: Plot): void {
+  ownKnownState.set(`${gardenerId}:${plot.position}`, plot.state);
+  for (const [res, id] of gardenerOf) {
+    if (id === gardenerId) write(res, { type: "own-update", plot });
+  }
+}
+
 export function broadcastActivity(activity: Activity): void {
   broadcast({ type: "activity", activity });
 }
@@ -166,12 +203,19 @@ export function clientCount(): number {
 // state changed, so a tab left open sees a plant sprout or wilt without
 // anyone clicking. Skips entirely while nobody's connected — there's no
 // ticking clock running when the app is otherwise idle or stopped.
-export function startSweep(getDerivedPlots: () => Plot[]): void {
+// Each connected gardener's own garden is swept too, and a change goes to their own
+// streams only.
+export function startSweep(getDerivedPlots: () => Plot[], getOwnPlots: (owner: string) => Plot[] | null): void {
   setInterval(() => {
     if (clients.size === 0) return;
     for (const plot of getDerivedPlots()) {
       if (lastKnownState.get(plot.position) !== plot.state) {
         broadcastUpdate(plot);
+      }
+    }
+    for (const owner of new Set(gardenerOf.values())) {
+      for (const plot of getOwnPlots(owner) ?? []) {
+        if (ownKnownState.get(`${owner}:${plot.position}`) !== plot.state) sendOwnUpdate(owner, plot);
       }
     }
   }, SWEEP_INTERVAL_MS).unref();

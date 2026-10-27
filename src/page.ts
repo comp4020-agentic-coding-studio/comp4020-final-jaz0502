@@ -136,12 +136,15 @@ export function renderPage(): string {
       <div class="you-actions">
         <button type="button" id="camera-button" class="journal-action" aria-label="Take a photo of the garden"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 8h3l1.6-2.2h6.8L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.2" r="3.6"/></svg><span>Camera</span></button>
         <button type="button" id="wave-button" class="journal-action" aria-label="Wave hello to everyone in the garden"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 13V6.5a1.5 1.5 0 0 1 3 0V12"/><path d="M11 11V5a1.5 1.5 0 0 1 3 0v6"/><path d="M14 11V6.5a1.5 1.5 0 0 1 3 0V14c0 4-2.6 6.5-6.2 6.5-2.6 0-4.2-1.4-5.4-3.4L3.8 14.3a1.4 1.4 0 0 1 2.3-1.5L8 15"/><path d="M19.5 4.5c.9.7 1.5 1.7 1.6 2.8"/></svg><span>Wave</span></button>
+        <button type="button" id="own-button" class="journal-action own-action" aria-label="Visit your own garden, which only you can see"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 21v-8"/><path d="M12 13c0-3.5 2.5-6 6.5-6 0 3.8-2.6 6-6.5 6z"/><path d="M12 15c0-3-2.2-5.2-5.6-5.2 0 3.3 2.3 5.2 5.6 5.2z"/><path d="M5 21h14"/></svg><span>My garden</span></button>
       </div>
       <h3 class="paper-heading">My record</h3>
       <!-- A plain record, private to you: one line, no tiles, totals or goals. -->
       <p id="you-counts" class="you-counts">
         <span>Planted <b id="count-planted">0</b></span><span class="dot" aria-hidden="true"> · </span><span>Watered <b id="count-watered">0</b></span><span class="dot" aria-hidden="true"> · </span><span>Composted <b id="count-composted">0</b></span>
       </p>
+      <!-- Seeds for your own garden: each kind and how many, with no total. -->
+      <p id="you-seeds" class="you-counts you-seeds" hidden><span class="seeds-label">Seeds:</span> <span id="you-seeds-list"></span></p>
       <details id="album" class="journal-album">
         <summary class="album-tab"><svg class="album-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="4.5" width="18" height="15" rx="1.5"/><circle cx="8.5" cy="9.5" r="1.7"/><path d="M3.5 17l5-5 3.5 3.5 3-3 5.5 5"/></svg><span>Album</span></summary>
         <p id="album-note" class="panel-help">Photos you take are kept in this browser only. Nobody else sees them.</p>
@@ -198,7 +201,30 @@ export function renderPage(): string {
   <!-- On a phone the journal starts closed, so its two actions also float in reach. -->
   <div id="quick-actions">
     <button type="button" id="quick-camera" class="quick-action" aria-label="Take a photo of the garden"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 8h3l1.6-2.2h6.8L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.2" r="3.6"/></svg></button>
+    <button type="button" id="quick-own" class="quick-action" aria-label="Visit your own garden, which only you can see"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 21v-8"/><path d="M12 13c0-3.5 2.5-6 6.5-6 0 3.8-2.6 6-6.5 6z"/><path d="M12 15c0-3-2.2-5.2-5.6-5.2 0 3.3 2.3 5.2 5.6 5.2z"/><path d="M5 21h14"/></svg></button>
     <button type="button" id="quick-wave" class="quick-action" aria-label="Wave hello to everyone in the garden"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 13V6.5a1.5 1.5 0 0 1 3 0V12"/><path d="M11 11V5a1.5 1.5 0 0 1 3 0v6"/><path d="M14 11V6.5a1.5 1.5 0 0 1 3 0V14c0 4-2.6 6.5-6.2 6.5-2.6 0-4.2-1.4-5.4-3.4L3.8 14.3a1.4 1.4 0 0 1 2.3-1.5L8 15"/><path d="M19.5 4.5c.9.7 1.5 1.7 1.6 2.8"/></svg></button>
+  </div>
+
+  <!-- In your own garden: the seeds you can plant, and the way back. -->
+  <div id="own-bar" class="paper" role="region" aria-label="Your own garden" hidden>
+    <div class="own-bar-head">
+      <h2 class="paper-title">My garden</h2>
+      <button type="button" id="own-back">Back<span class="own-back-long"> to the shared garden</span></button>
+    </div>
+    <p class="own-note">Only you can see it. Plant your seeds and look after them.</p>
+    <div id="own-picker" role="radiogroup" aria-label="Which seed to plant"></div>
+    <p id="own-empty" class="own-note">You have no seeds yet. Gather some from a fully grown plant in the shared garden.</p>
+  </div>
+
+
+  <!-- A fully grown plant can be watered, or have some of its seeds gathered. -->
+  <div id="plot-choice" role="dialog" aria-labelledby="plot-choice-label" hidden>
+    <p id="plot-choice-label"></p>
+    <div class="plot-choice-buttons">
+      <button type="button" id="choice-water">Water</button>
+      <button type="button" id="choice-gather">Gather seeds</button>
+      <button type="button" id="choice-cancel" class="choice-cancel">Not now</button>
+    </div>
   </div>
 
   <p id="status-bar" role="status" aria-live="polite">Hover a plot to see its status. Click to act.</p>

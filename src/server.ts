@@ -1,10 +1,10 @@
 import { createServer } from "node:http";
 import { startSweep } from "./realtime.ts";
-import { derivedPlots, handleRequest } from "./routes.ts";
+import { derivedOwnPlots, derivedPlots, handleRequest } from "./routes.ts";
 
 const port = Number(process.env.PORT ?? 8080);
 
-startSweep(derivedPlots);
+startSweep(derivedPlots, derivedOwnPlots);
 
 const server = createServer((req, res) => {
   handleRequest(req, res).catch((err: unknown) => {

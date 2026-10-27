@@ -1659,6 +1659,90 @@ function rebuildPlant(position, type, state) {
   obj.soilMesh.material.color.copy(obj.baseSoilColor);
 }
 
+// Your own garden: a bed of 4 x 4 plots out in the grass on the far side of the
+// shared garden from the cottage, only ever filled in from your own events. Every
+// browser draws an empty one there, and only yours is ever told what grows in it, so
+// nobody else sees your plants. No figure walks round it.
+const OWN_COLS = 4;
+const OWN_GARDEN_SIZE = OWN_COLS * OWN_COLS;
+const OWN_CENTRE = { x: -16, z: 6 };
+// From the middle of the bed to the middle of its edge row, and to its hedge.
+const OWN_HALF = ((OWN_COLS - 1) / 2) * SPACING;
+const OWN_HEDGE = OWN_HALF + 0.98;
+// position -> { group, soilMesh, plantGroup, ring, baseSoilColor }, like the shared plots
+const ownObjects = new Map();
+// position -> your latest own Plot from the server
+const ownPlots = new Map();
+
+{
+  const base = new THREE.Mesh(new THREE.BoxGeometry(OWN_HALF * 2 + 1.7, 0.3, OWN_HALF * 2 + 1.7), flatMaterial(bedBaseColour));
+  base.position.set(OWN_CENTRE.x, -0.3, OWN_CENTRE.z);
+  scene.add(base);
+
+  // A ring of flat stones round it, and a low hedge with a gap at the front.
+  const stoneMaterial = flatMaterial(0x9a958c);
+  const stoneGeometry = new THREE.CylinderGeometry(0.32, 0.36, 0.08, 7);
+  for (let i = 0; i < 34; i++) {
+    const t = (i / 34) * Math.PI * 2;
+    const r = OWN_HEDGE + 0.85 + seeded(i * 3 + 70) * 0.15;
+    const stone = new THREE.Mesh(stoneGeometry, stoneMaterial);
+    stone.position.set(OWN_CENTRE.x + Math.cos(t) * r * 1.05, GROUND_Y + 0.04, OWN_CENTRE.z + Math.sin(t) * r * 1.05);
+    stone.rotation.y = seeded(i + 80) * Math.PI;
+    stone.scale.setScalar(0.8 + seeded(i + 90) * 0.4);
+    scene.add(stone);
+  }
+  for (let side = 0; side < 4; side++) {
+    const steps = Math.round(OWN_HEDGE / 0.27);
+    for (let k = -steps; k <= steps; k++) {
+      // The front, facing the shared garden, has a gap to step through.
+      if (side === 0 && Math.abs(k) < 2) continue;
+      const along = k * 0.27;
+      const out = OWN_HEDGE;
+      const [x, z] = [[along, out], [out, along], [along, -out], [-out, along]][side];
+      const ball = new THREE.Mesh(hedgeBallGeometry, hedgeMaterials[(k + side) % 3 < 0 ? 0 : (k + side) % 3]);
+      ball.position.set(OWN_CENTRE.x + x, -0.08, OWN_CENTRE.z + z);
+      scene.add(ball);
+    }
+  }
+
+  for (let position = 0; position < OWN_GARDEN_SIZE; position++) {
+    const group = new THREE.Group();
+    group.position.set(
+      OWN_CENTRE.x - OWN_HALF + (position % OWN_COLS) * SPACING,
+      0,
+      OWN_CENTRE.z - OWN_HALF + Math.floor(position / OWN_COLS) * SPACING,
+    );
+    const soilMesh = new THREE.Mesh(new THREE.BoxGeometry(TILE_SIZE, TILE_HEIGHT, TILE_SIZE), flatMaterial(soilColorFor("empty")));
+    soilMesh.position.y = -TILE_HEIGHT / 2;
+    soilMesh.userData.ownPosition = position;
+    group.add(soilMesh);
+    const plantGroup = buildPlant("tree", "empty");
+    group.add(plantGroup);
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.48, 0.57, 4, 1, Math.PI / 4),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, side: THREE.DoubleSide }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.03;
+    ring.visible = false;
+    group.add(ring);
+    scene.add(group);
+    ownObjects.set(position, { group, soilMesh, plantGroup, ring, baseSoilColor: new THREE.Color(soilColorFor("empty")) });
+  }
+}
+
+const ownSoilMeshes = [...ownObjects.values()].map((obj) => obj.soilMesh);
+
+function rebuildOwnPlant(position, type, state) {
+  const obj = ownObjects.get(position);
+  disposeGroup(obj.plantGroup);
+  obj.group.remove(obj.plantGroup);
+  obj.plantGroup = buildPlant(type, state);
+  obj.group.add(obj.plantGroup);
+  obj.baseSoilColor = new THREE.Color(soilColorFor(state));
+  obj.soilMesh.material.color.copy(obj.baseSoilColor);
+}
+
 const waterAnimations = new Map();
 
 // Water drops: a burst of small drops falls onto a plot when anyone waters it,
@@ -1905,6 +1989,26 @@ function updateRings(now) {
     obj.ring.scale.setScalar(scale);
     obj.plantGroup.rotation.z = droop;
   }
+
+  // Your own plots' rings are only ever yours: they show how recently you watered.
+  for (const [position, obj] of ownObjects) {
+    const plot = ownPlots.get(position);
+    if (!plot || plot.state === "empty" || plot.state === "wilted") {
+      obj.ring.visible = false;
+      continue;
+    }
+    const freshness = freshnessOf(plot);
+    ringColour.copy(RING_GREY).lerp(me ? colourFor(me) : RING_GREY, freshness);
+    let opacity = 0.35 + 0.65 * freshness;
+    if (freshness < THIRSTY_FRACTION) {
+      const pulse = 0.5 + 0.5 * Math.sin(now / 250);
+      ringColour.lerp(RING_AMBER, 0.75);
+      opacity = 0.45 + 0.55 * pulse;
+    }
+    obj.ring.visible = true;
+    obj.ring.material.color.copy(ringColour);
+    obj.ring.material.opacity = opacity;
+  }
 }
 
 // Insects: butterflies visit a flower in bloom and bees a shrub in flower or a sunflower, by
@@ -2110,6 +2214,7 @@ function bedAreaAt(x, z) {
 }
 
 function goToBed(bed) {
+  if (ownMode) closeOwnGarden();
   if (bed === currentBed) return;
   currentBed = bed;
   setHoveredBed(null);
@@ -2198,6 +2303,7 @@ picker.addEventListener("click", (event) => {
 setSelectedType(selectedType, false);
 
 function applyPlot(plot) {
+  if (plot.position === choicePosition && plot.state !== "mature") closePlotChoice();
   const prev = plots.get(plot.position);
   const stateChanged = !prev || prev.state !== plot.state || prev.plantType !== plot.plantType;
   const wateredChanged =
@@ -2217,6 +2323,191 @@ function applyPlot(plot) {
   if (wateredChanged) triggerWaterEffect(plot.position, plot.lastWateredBy);
   if (action) showActionBadge(plot.position, action, plot.lastWateredBy);
   if (hoveredPosition === plot.position) refreshStatusBarForHover(plot);
+}
+
+// One of your own plots changed, or arrived on connect.
+function applyOwnPlot(plot) {
+  const prev = ownPlots.get(plot.position);
+  ownPlots.set(plot.position, plot);
+  if (!prev || prev.state !== plot.state || prev.plantType !== plot.plantType) {
+    rebuildOwnPlant(plot.position, plot.plantType ?? "tree", plot.state);
+  }
+  if (prev && plot.lastWateredAt !== null && (prev.lastWateredAt === null || plot.lastWateredAt > prev.lastWateredAt)) {
+    const obj = ownObjects.get(plot.position);
+    obj.soilMesh.material.color.copy(obj.baseSoilColor).multiplyScalar(0.55);
+    setTimeout(() => obj.soilMesh.material.color.copy(obj.baseSoilColor), 700);
+  }
+  if (ownMode && hoveredOwn === plot.position) refreshOwnHover(plot);
+}
+
+// Visiting your own garden. The camera glides over to it and the shared garden's
+// signs, picker and recent list step aside; your figure stays on the shared paths.
+// Only the view changes, so it never limits what anyone can do.
+let ownMode = false;
+let hoveredOwn = null;
+let ownReturn = null; // where the camera was, to glide back to
+let ownSeeds = {};
+let ownSelected = null;
+const ownBar = document.getElementById("own-bar");
+const ownPicker = document.getElementById("own-picker");
+const ownEmpty = document.getElementById("own-empty");
+const ownButtons = [document.getElementById("own-button"), document.getElementById("quick-own")];
+
+// The button that takes you to your garden takes you back to the shared one while you
+// are there, and says so.
+const OWN_LABELS = {
+  to: "Visit your own garden, which only you can see",
+  back: "Go back to the shared garden",
+};
+function renderOwnButtons() {
+  for (const button of ownButtons) {
+    button.setAttribute("aria-label", ownMode ? OWN_LABELS.back : OWN_LABELS.to);
+    const label = button.querySelector("span");
+    if (label) label.textContent = ownMode ? "Shared garden" : "My garden";
+  }
+}
+
+function glideTo(toTarget, toCamera) {
+  glide = { start: performance.now(), fromTarget: controls.target.clone(), toTarget, fromCamera: camera.position.clone(), toCamera };
+}
+
+function openOwnGarden() {
+  if (ownMode || photoMode) return;
+  ownMode = true;
+  closePlotChoice();
+  clearHoveredPlot();
+  setHoveredBed(null);
+  clearStatusBarHover();
+  ownReturn = { target: (glide ? glide.toTarget : controls.target).clone(), camera: (glide ? glide.toCamera : camera.position).clone() };
+  document.body.classList.add("own-mode");
+  ownBar.hidden = false;
+  renderOwnButtons();
+  renderOwnPicker();
+  const target = new THREE.Vector3(OWN_CENTRE.x, controls.target.y, OWN_CENTRE.z);
+  // Look in from the front, the side facing the shared garden.
+  glideTo(target, target.clone().add(new THREE.Vector3(4.2, 5.2, 6.1)));
+  statusBar.textContent = "Your own garden. Only you can see it. Click a plot to tend it.";
+}
+
+function closeOwnGarden() {
+  if (!ownMode) return;
+  ownMode = false;
+  clearOwnHover();
+  document.body.classList.remove("own-mode");
+  ownBar.hidden = true;
+  renderOwnButtons();
+  if (ownReturn) glideTo(ownReturn.target, ownReturn.camera);
+  clearStatusBarHover();
+}
+
+for (const button of ownButtons) {
+  button.addEventListener("click", () => (ownMode ? closeOwnGarden() : openOwnGarden()));
+}
+document.getElementById("own-back").addEventListener("click", closeOwnGarden);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && ownMode && plotChoice.hidden && !photoMode) closeOwnGarden();
+});
+
+
+// The seeds you can plant here, as a picker. Each kind shows how many you have, and
+// there is no total.
+function renderOwnPicker() {
+  const kinds = Object.entries(ownSeeds).filter(([, count]) => count > 0);
+  if (!kinds.some(([type]) => type === ownSelected)) ownSelected = kinds[0]?.[0] ?? null;
+  ownEmpty.hidden = kinds.length > 0;
+  ownPicker.replaceChildren(
+    ...kinds.map(([type, count]) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.setAttribute("role", "radio");
+      button.setAttribute("aria-checked", String(type === ownSelected));
+      button.dataset.type = type;
+      const chip = document.createElement("span");
+      chip.className = `chip chip-${type}`;
+      const b = document.createElement("b");
+      b.textContent = String(count);
+      button.append(chip, `${PLANT_NAME[type]} `, b);
+      return button;
+    }),
+  );
+}
+
+ownPicker.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-type]");
+  if (!button) return;
+  ownSelected = button.dataset.type;
+  renderOwnPicker();
+  if (hoveredOwn !== null) refreshOwnHover(ownPlots.get(hoveredOwn));
+});
+
+function describeOwnPlot(plot) {
+  if (plot.state === "empty") {
+    return ownSelected ? `Empty plot — click to plant a ${PLANT_NAME[ownSelected].toLowerCase()} seed` : "Empty plot — gather seeds from a fully grown plant to plant here";
+  }
+  const type = plot.plantType ?? "tree";
+  if (plot.state === "wilted") return `${PLANT_NAME[type]}, wilted — needs composting`;
+  return `${PLANT_NAME[type]}, ${STAGE_LABEL[type][plot.state]}`;
+}
+
+function refreshOwnHover(plot) {
+  if (!plot) return;
+  statusBar.textContent = describeOwnPlot(plot);
+  if (plot.lastWateredAt !== null) statusBar.append(` — you watered it ${formatAgo(plot.lastWateredAt, serverNow())}`);
+  if (isThirsty(plot)) statusBar.append(" (thirsty)");
+}
+
+function clearOwnHover() {
+  if (hoveredOwn !== null) ownObjects.get(hoveredOwn).soilMesh.scale.set(1, 1, 1);
+  hoveredOwn = null;
+}
+
+function ownPointerMove(event) {
+  raycaster.setFromCamera(ndcFromEvent(event), camera);
+  const hit = raycaster.intersectObjects(ownSoilMeshes, false)[0];
+  const position = hit ? hit.object.userData.ownPosition : null;
+  if (position === hoveredOwn) return;
+  clearOwnHover();
+  hoveredOwn = position;
+  renderer.domElement.style.cursor = position === null ? "" : "pointer";
+  if (position !== null) {
+    ownObjects.get(position).soilMesh.scale.set(1, 1.25, 1);
+    refreshOwnHover(ownPlots.get(position));
+  } else {
+    statusBar.textContent = "Your own garden. Only you can see it. Click a plot to tend it.";
+  }
+}
+
+async function ownClick(event) {
+  raycaster.setFromCamera(ndcFromEvent(event), camera);
+  const hit = raycaster.intersectObjects(ownSoilMeshes, false)[0];
+  if (!hit) return;
+  const position = hit.object.userData.ownPosition;
+  const state = ownPlots.get(position)?.state ?? "empty";
+  const action = actionFor(state);
+  if (action === "plant" && !ownSelected) {
+    showStatusMessage("You have no seeds yet. Gather some from a fully grown plant in the shared garden.");
+    return;
+  }
+  if (Date.now() < actionsPausedUntil) {
+    showStatusMessage(SLOW_DOWN_MESSAGE);
+    return;
+  }
+  try {
+    const res = await fetch(`/api/own-garden/${position}/${action}`, {
+      method: "POST",
+      ...(action === "plant" ? { headers: { "content-type": "application/json" }, body: JSON.stringify({ type: ownSelected }) } : {}),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 429) {
+        const seconds = Number(res.headers.get("retry-after"));
+        actionsPausedUntil = Date.now() + (Number.isFinite(seconds) && seconds > 0 ? seconds : 5) * 1000;
+      }
+      showStatusMessage(body.error ?? "That action isn't valid for this plot right now.");
+    }
+  } catch {
+    showStatusMessage("Couldn't reach the server — try again.");
+  }
 }
 
 // Little gardeners: one figure for each gardener online, walking along the loop
@@ -2587,6 +2878,34 @@ function renderStats(stats) {
       : `Tending since ${new Date(stats.since).toLocaleDateString(undefined, { day: "numeric", month: "short" })}`;
 }
 
+// The seeds you have gathered, for your own garden: what you have of each kind, as a
+// plain line. Like the record, only ever sent to you, and it shows no total.
+
+const youSeeds = document.getElementById("you-seeds");
+const youSeedsList = document.getElementById("you-seeds-list");
+
+function renderSeeds(seeds) {
+  ownSeeds = seeds;
+  if (ownMode) renderOwnPicker();
+  const kinds = Object.entries(seeds).filter(([, count]) => count > 0);
+  youSeeds.hidden = kinds.length === 0;
+  youSeedsList.replaceChildren(
+    ...kinds.flatMap(([type, count], i) => {
+      const item = document.createElement("span");
+      item.append(`${PLANT_NAME[type]} `);
+      const b = document.createElement("b");
+      b.textContent = String(count);
+      item.append(b);
+      if (i === 0) return [item];
+      const dot = document.createElement("span");
+      dot.className = "dot";
+      dot.setAttribute("aria-hidden", "true");
+      dot.textContent = " · ";
+      return [dot, item];
+    }),
+  );
+}
+
 // The recent list: the last few things gardeners did, newest first. The server
 // keeps and sends it; this only draws it. It shows no counts and no totals.
 const FEED_LENGTH = 3;
@@ -2648,6 +2967,11 @@ function connect() {
   });
   source.addEventListener("wave", (event) => waveFigure(JSON.parse(event.data).id));
   source.addEventListener("stats", (event) => renderStats(JSON.parse(event.data)));
+  source.addEventListener("seeds", (event) => renderSeeds(JSON.parse(event.data)));
+  source.addEventListener("own-garden", (event) => {
+    for (const plot of JSON.parse(event.data)) applyOwnPlot(plot);
+  });
+  source.addEventListener("own-update", (event) => applyOwnPlot(JSON.parse(event.data)));
   source.addEventListener("feed", (event) => {
     feed = JSON.parse(event.data).slice(0, FEED_LENGTH);
     renderFeed();
@@ -2699,6 +3023,8 @@ const SLOW_DOWN_MESSAGE = "Slow down: too many actions, try again in a few secon
 
 async function handlePointerClick(event) {
   if (photoMode) return; // the camera only looks: nothing in the garden is touched
+  closePlotChoice();
+  if (ownMode) return ownClick(event);
   raycaster.setFromCamera(ndcFromEvent(event), camera);
   const hit = raycaster.intersectObjects(soilMeshes, false)[0];
   if (!hit) {
@@ -2724,8 +3050,17 @@ async function handlePointerClick(event) {
   const plotSpot = worldPosition(position);
   walkTo(nearestLoopU(plotSpot.x, plotSpot.z, currentBed));
   const state = plots.get(position)?.state ?? "empty";
-  const action = actionFor(state);
+  // A fully grown plant can be watered or have its seeds gathered, so ask which.
+  if (state === "mature") {
+    openPlotChoice(position);
+    return;
+  }
+  sendAction(position, actionFor(state));
+}
 
+// Sends one action to the server. The garden changes only when the server's event
+// arrives, so this only has to say when something was turned away.
+async function sendAction(position, action) {
   // The server has said to slow down: wait until it says to try again, rather than
   // sending clicks it will only turn away.
   if (Date.now() < actionsPausedUntil) {
@@ -2742,18 +3077,54 @@ async function handlePointerClick(event) {
             body: JSON.stringify({ type: plantHere() }),
           })
         : await fetch(`/api/plots/${position}/${action}`, { method: "POST" });
+    const body = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
       if (res.status === 429) {
         const seconds = Number(res.headers.get("retry-after"));
         actionsPausedUntil = Date.now() + (Number.isFinite(seconds) && seconds > 0 ? seconds : 5) * 1000;
       }
       showStatusMessage(body.error ?? "That action isn't valid for this plot right now.");
+    } else if (action === "gather") {
+      // Gathering changes nothing in the garden, so there is no garden event to
+      // show it: say what you got. Your seeds arrive on your own stream.
+      const name = PLANT_NAME[body.type ?? "tree"].toLowerCase();
+      showStatusMessage(`You gathered ${body.gained} ${name} seed${body.gained === 1 ? "" : "s"}`);
     }
   } catch {
     showStatusMessage("Couldn't reach the server — try again.");
   }
 }
+
+// The choice a fully grown plant offers: water it, or gather some of its seeds.
+// Gathering never changes the plant.
+const plotChoice = document.getElementById("plot-choice");
+const plotChoiceLabel = document.getElementById("plot-choice-label");
+let choicePosition = null;
+
+function openPlotChoice(position) {
+  choicePosition = position;
+  const type = plots.get(position)?.plantType ?? "tree";
+  plotChoiceLabel.textContent = `${PLANT_NAME[type]}, fully grown`;
+  plotChoice.hidden = false;
+  document.getElementById("choice-water").focus({ preventScroll: true });
+}
+
+function closePlotChoice() {
+  choicePosition = null;
+  plotChoice.hidden = true;
+}
+
+for (const [id, action] of [["choice-water", "water"], ["choice-gather", "gather"]]) {
+  document.getElementById(id).addEventListener("click", () => {
+    const position = choicePosition;
+    closePlotChoice();
+    if (position !== null) sendAction(position, action);
+  });
+}
+document.getElementById("choice-cancel").addEventListener("click", closePlotChoice);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !plotChoice.hidden) closePlotChoice();
+});
 
 let downX = 0;
 let downY = 0;
@@ -2816,7 +3187,7 @@ function updateBedSigns() {
     const x = rect.left + ((signPoint.x + 1) / 2) * rect.width;
     const y = rect.top + ((1 - signPoint.y) / 2) * rect.height;
     const visible =
-      bed !== currentBed && !glide && signPoint.z < 1 && x > rect.left && x < rect.right && y > rect.top && y < rect.bottom;
+      !ownMode && bed !== currentBed && !glide && signPoint.z < 1 && x > rect.left && x < rect.right && y > rect.top && y < rect.bottom;
     if (sign.hidden === visible) sign.hidden = !visible;
     if (!visible) return;
     sign.style.left = `${x}px`;
@@ -2831,6 +3202,7 @@ function clearHoveredPlot() {
 
 renderer.domElement.addEventListener("pointermove", (event) => {
   if (photoMode) return;
+  if (ownMode) return ownPointerMove(event);
   raycaster.setFromCamera(ndcFromEvent(event), camera);
   const hit = raycaster.intersectObjects(soilMeshes, false)[0];
   let position = hit ? hit.object.userData.position : null;
@@ -2868,6 +3240,7 @@ renderer.domElement.addEventListener("pointermove", (event) => {
 });
 
 renderer.domElement.addEventListener("pointerleave", () => {
+  clearOwnHover();
   clearHoveredPlot();
   setHoveredBed(null);
   clearStatusBarHover();
@@ -2933,6 +3306,7 @@ function setPhotoShape(shape) {
 }
 
 function openPhotoMode() {
+  closePlotChoice();
   if (photoMode) return;
   photoMode = true;
   clearHoveredPlot();
