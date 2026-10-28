@@ -19,6 +19,11 @@ export const sleep = (ms: number): Promise<void> => new Promise((resolve) => set
 // connection.
 export const fresh = { connection: "close" };
 
+// For specs that are about something other than how much one person may plant: they
+// plant a lot as one visitor, so they switch the planting limit off on their private
+// server. spec/plant-limit.test.ts is the one that tests it.
+export const NO_PLANT_LIMIT = { PLANT_LIMIT: "100000", PLANT_BED_LIMIT: "100000" };
+
 export interface PrivateApp {
   url: string;
   // Everything the server has written to its log so far, one string per line.

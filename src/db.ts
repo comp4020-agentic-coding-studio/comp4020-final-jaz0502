@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { type DecorationState, MAX_CREDIT, stateFor } from "./decorations.ts";
 import { GRID_SIZE } from "./garden.ts";
 import type { PlantType, Plot, PlotState } from "./types.ts";
 
@@ -352,4 +353,69 @@ export function compostOwn(owner: string, position: number): void {
 // many who don't.
 export function hasOwnGarden(owner: string): boolean {
   return Boolean(ownHasStmt.get(owner));
+}
+
+// Decorations for your own garden. `decoration_credit` is how many waterings have
+// counted for a gardener, which only ever goes up (so an unlocked decoration is never
+// taken back) and stops once everything is unlocked. `own_decor` is what they have put
+// where. Both are keyed by the public id, never the cookie, and go to that gardener
+// alone. A row appears with a gardener's first counting watering, and only this many
+// gardeners keep one, so a stranger minting cookies can't grow the database without
+// limit.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS decoration_credit (
+    owner   TEXT    PRIMARY KEY,
+    credit  INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS own_decor (
+    owner      TEXT NOT NULL,
+    spot       TEXT NOT NULL,
+    decoration TEXT NOT NULL,
+    PRIMARY KEY (owner, spot)
+  );
+`);
+
+const MAX_DECOR_KEEPERS = Number(process.env.MAX_DECOR_KEEPERS ?? 2000);
+
+const creditStmt = db.prepare("SELECT credit FROM decoration_credit WHERE owner = ?");
+const creditCountStmt = db.prepare("SELECT COUNT(*) AS n FROM decoration_credit");
+const addCreditStmt = db.prepare(`
+  INSERT INTO decoration_credit (owner, credit) VALUES (?, 1)
+  ON CONFLICT (owner) DO UPDATE SET credit = credit + 1
+`);
+const placedStmt = db.prepare("SELECT spot, decoration FROM own_decor WHERE owner = ?");
+const placeStmt = db.prepare(`
+  INSERT INTO own_decor (owner, spot, decoration) VALUES (?, ?, ?)
+  ON CONFLICT (owner, spot) DO UPDATE SET decoration = excluded.decoration
+`);
+const clearSpotStmt = db.prepare("DELETE FROM own_decor WHERE owner = ? AND spot = ?");
+
+export function getDecorations(owner: string): DecorationState {
+  const credit = (creditStmt.get(owner) as unknown as { credit: number } | undefined)?.credit ?? 0;
+  const placed: Record<string, string> = {};
+  for (const row of placedStmt.all(owner) as unknown as { spot: string; decoration: string }[]) {
+    placed[row.spot] = row.decoration;
+  }
+  return stateFor(credit, placed);
+}
+
+// Counts one watering towards the next decoration. Returns false if it did not
+// count: everything is already unlocked, or there is no room to keep another gardener.
+export function creditWatering(owner: string): boolean {
+  const row = creditStmt.get(owner) as unknown as { credit: number } | undefined;
+  if (!row) {
+    const { n } = creditCountStmt.get() as unknown as { n: number };
+    if (n >= MAX_DECOR_KEEPERS) return false;
+  } else if (row.credit >= MAX_CREDIT) {
+    return false;
+  }
+  addCreditStmt.run(owner);
+  return true;
+}
+
+// Puts a decoration on a spot, or clears the spot with null. The caller has checked
+// that it is unlocked and that it suits the spot.
+export function placeDecoration(owner: string, spot: string, decoration: string | null): void {
+  if (decoration === null) clearSpotStmt.run(owner, spot);
+  else placeStmt.run(owner, spot, decoration);
 }

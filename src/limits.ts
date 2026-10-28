@@ -56,3 +56,53 @@ function dropExpired(now: number): void {
     windows.delete(oldest);
   }
 }
+
+// How much one gardener may plant in the shared garden: so many plantings in any
+// hour, and only so many of those in one bed, so nobody takes over a bed or the
+// whole garden. It counts plantings that succeeded, because a refused one planted
+// nothing; the limit above already stops anyone hammering. It is a rolling hour, so
+// the allowance comes back a little at a time rather than all at once, and nobody is
+// locked out for long. Like the action limit it is kept in memory by public id, so the
+// cookie never comes in, and it starts empty after a restart. It is only about the
+// shared garden: your own garden is yours and is limited by your seeds.
+const PLANT_LIMIT = Number(process.env.PLANT_LIMIT ?? 8);
+const PLANT_BED_LIMIT = Number(process.env.PLANT_BED_LIMIT ?? 5);
+const PLANT_WINDOW_MS = Number(process.env.PLANT_WINDOW_MS ?? 60 * 60_000);
+
+const plantings = new Map<string, { at: number; bed: number }[]>();
+
+export type PlantingResult =
+  | { ok: true }
+  | { ok: false; reason: "plant-limit" | "bed-limit"; retryAfterMs: number };
+
+function recentPlantings(id: string, now: number): { at: number; bed: number }[] {
+  const kept = (plantings.get(id) ?? []).filter((p) => now - p.at < PLANT_WINDOW_MS);
+  if (kept.length > 0) plantings.set(id, kept);
+  else plantings.delete(id);
+  return kept;
+}
+
+// Whether this gardener may plant in this bed now, and if not, how long until they
+// may. Does not count anything: call recordPlanting once it has worked.
+export function mayPlant(id: string, bed: number, now: number): PlantingResult {
+  const recent = recentPlantings(id, now);
+  const inBed = recent.filter((p) => p.bed === bed);
+  // The allowance comes back when the oldest planting that is in the way ages out.
+  if (inBed.length >= PLANT_BED_LIMIT) {
+    return { ok: false, reason: "bed-limit", retryAfterMs: inBed[inBed.length - PLANT_BED_LIMIT].at + PLANT_WINDOW_MS - now };
+  }
+  if (recent.length >= PLANT_LIMIT) {
+    return { ok: false, reason: "plant-limit", retryAfterMs: recent[recent.length - PLANT_LIMIT].at + PLANT_WINDOW_MS - now };
+  }
+  return { ok: true };
+}
+
+export function recordPlanting(id: string, bed: number, now: number): void {
+  // Past this many people in the table, the oldest are dropped, so a stranger minting
+  // cookies cannot grow it without limit.
+  if (!plantings.has(id) && plantings.size >= MAX_TRACKED) {
+    const oldest = plantings.keys().next().value;
+    if (oldest !== undefined) plantings.delete(oldest);
+  }
+  plantings.set(id, [...recentPlantings(id, now), { at: now, bed }]);
+}

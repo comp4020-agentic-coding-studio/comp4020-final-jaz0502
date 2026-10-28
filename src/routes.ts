@@ -1,14 +1,15 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { recordActivity } from "./activity.ts";
 import * as db from "./db.ts";
-import { BEDS, DAY_LENGTH_MS, WILT_WINDOW_MS, bedAt, bedTakes, derivePlot, isPlantType } from "./garden.ts";
+import { DECORATIONS, decorationById, spotKind, wateringCounts } from "./decorations.ts";
+import { BEDS, DAY_LENGTH_MS, WILT_WINDOW_MS, bedAt, bedOfPlot, bedTakes, derivePlot, isPlantType } from "./garden.ts";
 import { getOrSetIdentity, publicId } from "./identity.ts";
-import { allowAction } from "./limits.ts";
+import { allowAction, mayPlant, recordPlanting } from "./limits.ts";
 import { logEvent } from "./log.ts";
 import { renderPage } from "./page.ts";
 import { move as moveGardener, wave as waveGardener } from "./presence.ts";
 import { renderReadme } from "./readme.ts";
-import { broadcastActivity, broadcastPresenceUpdate, broadcastUpdate, broadcastWave, sendOwnUpdate, sendSeeds, sendStats, subscribe } from "./realtime.ts";
+import { broadcastActivity, broadcastPresenceUpdate, broadcastUpdate, broadcastWave, sendDecorations, sendOwnUpdate, sendSeeds, sendStats, subscribe } from "./realtime.ts";
 import { serveStatic } from "./static.ts";
 import type { PlantType, Plot } from "./types.ts";
 
@@ -104,6 +105,15 @@ function refusalReason(position: number, action: "plant" | "water" | "compost"):
 
 const ACTION_PATTERN =/^\/api\/plots\/(\d+)\/(plant|water|compost)$/;
 const GATHER_PATTERN = /^\/api\/plots\/(\d+)\/gather$/;
+// Putting a decoration on a spot in your own garden (or clearing the spot). Whose
+// garden it is comes from the cookie alone.
+const DECORATE_PATH = "/api/own-garden/decorate";
+
+const DECORATE_REFUSALS: Record<string, string> = {
+  "unknown-decoration": "There is no such decoration.",
+  "bad-spot": "That spot is not for this decoration.",
+  locked: "You haven't unlocked that decoration yet.",
+};
 // Your own garden. There is no way to name anyone else's: whose garden it is comes
 // from the cookie alone.
 const OWN_PATTERN = /^\/api\/own-garden\/(\d+)\/(plant|water|compost)$/;
@@ -191,6 +201,7 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
       db.getStats(publicId(identity)),
       db.getSeeds(publicId(identity)),
       ownPlotsNow(publicId(identity)),
+      db.getDecorations(publicId(identity)),
     );
     return;
   }
@@ -275,6 +286,55 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
       res.writeHead(result.reason === "no-such-plot" ? 404 : 409, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: GATHER_REFUSALS[result.reason] ?? "There is no plot there." }));
     }
+    return;
+  }
+
+  // Putting a decoration in your own garden. It only changes how your own garden looks:
+  // it never touches either garden's plots, and only you are told. It counts against
+  // the same limit, and a decoration you haven't unlocked is turned away.
+  if (req.method === "POST" && pathname === DECORATE_PATH) {
+    const who = publicId(identity);
+    const limit = allowAction(who, Date.now());
+    if (!limit.ok) {
+      if (limit.firstRefusal) logEvent(who, "decorate", { result: "refused", reason: "rate-limited" });
+      res.writeHead(429, {
+        "content-type": "application/json",
+        "retry-after": String(Math.max(1, Math.ceil(limit.retryAfterMs / 1000))),
+      });
+      res.end(JSON.stringify({ error: "Slow down: too many actions, try again in a few seconds" }));
+      return;
+    }
+
+    const refuse = (status: number, reason: string, fields: Record<string, string> = {}) => {
+      logEvent(who, "decorate", { ...fields, result: "refused", reason });
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: DECORATE_REFUSALS[reason] ?? "Not possible." }));
+    };
+
+    const body = await readJsonBody(req);
+    const asked = typeof body === "object" && body !== null ? (body as { spot?: unknown; decoration?: unknown }) : {};
+    const kind = spotKind(asked.spot);
+    if (kind === null) return refuse(400, "bad-spot");
+    const spot = asked.spot as string;
+
+    if (asked.decoration === null) {
+      db.placeDecoration(who, spot, null);
+      logEvent(who, "decorate", { spot, decoration: "none", result: "ok" });
+    } else {
+      const decoration = decorationById(asked.decoration);
+      if (!decoration) return refuse(400, "unknown-decoration", { spot });
+      if (decoration.kind !== kind) return refuse(400, "bad-spot", { spot, decoration: decoration.id });
+      if (!db.getDecorations(who).unlocked.includes(decoration.id)) {
+        return refuse(409, "locked", { spot, decoration: decoration.id });
+      }
+      db.placeDecoration(who, spot, decoration.id);
+      logEvent(who, "decorate", { spot, decoration: decoration.id, result: "ok" });
+    }
+
+    const state = db.getDecorations(who);
+    sendDecorations(who, state);
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(state));
     return;
   }
 
@@ -384,6 +444,31 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
       }
     }
 
+    // Only so much planting in an hour, and only so much of it in one bed. A position
+    // that is not a plot is left to the usual refusal below.
+    const plantBed = bedAt(position) ? bedOfPlot(position) : null;
+    if (action === "plant" && plantBed !== null) {
+      const allowed = mayPlant(publicId(identity), plantBed, Date.now());
+      if (!allowed.ok) {
+        logEvent(publicId(identity), "plant", { plot: position, type: plantType, result: "refused", reason: allowed.reason });
+        const minutes = Math.max(1, Math.ceil(allowed.retryAfterMs / 60_000));
+        res.writeHead(409, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify({
+            error:
+              allowed.reason === "bed-limit"
+                ? `You have planted as much as you can in ${bedAt(position)!.name} for now. Try again in about ${minutes} minute${minutes === 1 ? "" : "s"}, or plant in another bed.`
+                : `You have planted as much as you can for now. Try again in about ${minutes} minute${minutes === 1 ? "" : "s"}.`,
+          }),
+        );
+        return;
+      }
+    }
+
+    // Whether this watering will count towards a decoration, read before it changes
+    // the plot's last-watered time.
+    const countsTowardsDecoration = action === "water" && wateringCounts(db.getPlot(position)?.lastWateredAt ?? null, Date.now());
+
     const result =
       action === "plant"
         ? handlePlant(position, identity, plantType)
@@ -393,6 +478,7 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
 
     const who = publicId(identity);
     if (result) {
+      if (action === "plant" && plantBed !== null) recordPlanting(who, plantBed, Date.now());
       logEvent(who, action, { plot: position, ...(action === "plant" ? { type: plantType } : {}), result: "ok" });
       broadcastActivity(
         recordActivity({ id: who, did: action, plot: position, ...(action === "plant" ? { type: plantType } : {}) }),
@@ -401,6 +487,16 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
       // A plain record for the one who did it, kept by public id and sent to their
       // own streams only.
       sendStats(publicId(identity), db.recordAction(publicId(identity), action, Date.now()));
+
+      // Looking after the shared garden earns decorations for your own, privately.
+      if (countsTowardsDecoration) {
+        const before = db.getDecorations(who).unlocked.length;
+        if (db.creditWatering(who)) {
+          const state = db.getDecorations(who);
+          if (state.unlocked.length > before) logEvent(who, "unlock", { decoration: DECORATIONS[before].id });
+          sendDecorations(who, state);
+        }
+      }
 
       const publicResult = toPublic(result);
       broadcastUpdate(publicResult);

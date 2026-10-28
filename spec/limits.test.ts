@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { publicId } from "../src/identity.ts";
-import { newVisitor, plantFor, readPlots, sleep, startApp, type PrivateApp } from "./support.ts";
+import { newVisitor, plantFor, readPlots, sleep, startApp, type PrivateApp, NO_PLANT_LIMIT } from "./support.ts";
 
 // How often one gardener may act on a plot: a budget in a window of time, checked
 // on the server and counted per person. A private server with a small budget and a
@@ -10,7 +10,7 @@ const WINDOW_MS = 1500;
 
 let app: PrivateApp;
 beforeAll(async () => {
-  app = await startApp({ ACTION_LIMIT: String(LIMIT), ACTION_WINDOW_MS: String(WINDOW_MS), WILT_WINDOW_MS: "1000000" });
+  app = await startApp({ ACTION_LIMIT: String(LIMIT), ACTION_WINDOW_MS: String(WINDOW_MS), WILT_WINDOW_MS: "1000000", ...NO_PLANT_LIMIT });
 });
 afterAll(async () => {
   await app.stop();

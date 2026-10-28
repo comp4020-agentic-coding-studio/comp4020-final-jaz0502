@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { publicId } from "../src/identity.ts";
-import { newVisitor, openStream, plantFor, postWave, sleep, startApp, type PrivateApp, type Stream } from "./support.ts";
+import { newVisitor, openStream, plantFor, postWave, sleep, startApp, type PrivateApp, type Stream, NO_PLANT_LIMIT } from "./support.ts";
 
 // A short list of what gardeners have just done. It is a glance at what just
 // happened, not a history or a tally. Each test uses its own private copy of the
@@ -15,7 +15,7 @@ interface Entry {
 let app: PrivateApp;
 const open: Stream[] = [];
 beforeEach(async () => {
-  app = await startApp({ WILT_WINDOW_MS: "1500" });
+  app = await startApp({ WILT_WINDOW_MS: "1500", ...NO_PLANT_LIMIT });
 });
 afterEach(async () => {
   for (const stream of open.splice(0)) stream.close();

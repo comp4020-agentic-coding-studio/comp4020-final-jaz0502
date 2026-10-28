@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { publicId } from "../src/identity.ts";
-import { newVisitor, plantFor, readPlots, sleep, startApp, type PrivateApp } from "./support.ts";
+import { newVisitor, plantFor, readPlots, sleep, startApp, type PrivateApp, NO_PLANT_LIMIT } from "./support.ts";
 
 // The garden's rules: who can plant, water and compost what, and when.
 // Each test uses its own plot so they don't depend on each other. These run
@@ -11,7 +11,7 @@ const WILT_MS = 2000;
 
 let app: PrivateApp;
 beforeAll(async () => {
-  app = await startApp({ WILT_WINDOW_MS: String(WILT_MS) });
+  app = await startApp({ WILT_WINDOW_MS: String(WILT_MS), ...NO_PLANT_LIMIT });
 });
 afterAll(async () => {
   await app.stop();

@@ -33,6 +33,11 @@ export function bedAt(position: number): Bed | undefined {
   return BEDS[Math.floor(position / BED_PLOTS)];
 }
 
+// Which bed, counting from 0, a plot is in. Only for a position that is a plot.
+export function bedOfPlot(position: number): number {
+  return Math.floor(position / BED_PLOTS);
+}
+
 export function bedTakes(bed: Bed, plantType: PlantType): boolean {
   return bed.takes === null || bed.takes.includes(plantType);
 }

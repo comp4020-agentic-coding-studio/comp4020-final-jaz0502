@@ -1,6 +1,7 @@
 import type { ServerResponse } from "node:http";
 import { type Activity, recentActivity } from "./activity.ts";
 import type { GardenerStats, Seeds } from "./db.ts";
+import type { DecorationState } from "./decorations.ts";
 import { logEvent } from "./log.ts";
 import { type Gardener, connect, disconnect, listGardeners } from "./presence.ts";
 import type { PlantType, Plot, PlotState } from "./types.ts";
@@ -37,6 +38,9 @@ type SseEvent =
   | { type: "seeds"; seeds: Seeds }
   // Your own garden's plots: all of them on connect, then each one that changes.
   // Sent to your own streams only, and nobody else is ever told about it.
+  // The decorations you have unlocked, how many waterings until the next, and what you
+  // have put where. Sent to your own streams only, never broadcast.
+  | { type: "decorations"; decorations: DecorationState }
   | { type: "own-garden"; plots: Plot[] }
   | { type: "own-update"; plot: Plot }
   // What gardeners have just done: the short recent list once on connect, then each
@@ -84,6 +88,8 @@ function payloadOf(event: SseEvent): unknown {
       return event.stats;
     case "seeds":
       return event.seeds;
+    case "decorations":
+      return event.decorations;
     case "own-garden":
       return event.plots;
     case "own-update":
@@ -116,6 +122,7 @@ export function subscribe(
   stats: GardenerStats,
   seeds: Seeds,
   ownPlots: Plot[],
+  decorations: DecorationState,
 ): void {
   res.writeHead(200, {
     "content-type": "text/event-stream",
@@ -140,6 +147,7 @@ export function subscribe(
   write(res, { type: "presence", gardeners: listGardeners() });
   write(res, { type: "stats", stats });
   write(res, { type: "seeds", seeds });
+  write(res, { type: "decorations", decorations });
   write(res, { type: "own-garden", plots: ownPlots });
   for (const plot of ownPlots) ownKnownState.set(`${gardenerId}:${plot.position}`, plot.state);
   write(res, { type: "feed", feed: recentActivity() });
@@ -176,6 +184,13 @@ export function sendStats(gardenerId: string, stats: GardenerStats): void {
 export function sendSeeds(gardenerId: string, seeds: Seeds): void {
   for (const [res, id] of gardenerOf) {
     if (id === gardenerId) write(res, { type: "seeds", seeds });
+  }
+}
+
+// Send a gardener their decorations, to their own streams and no one else's.
+export function sendDecorations(gardenerId: string, decorations: DecorationState): void {
+  for (const [res, id] of gardenerOf) {
+    if (id === gardenerId) write(res, { type: "decorations", decorations });
   }
 }
 
