@@ -4475,6 +4475,83 @@ function updateCottage(timeSeconds) {
   cottageSwing.rotation.x = Math.sin(timeSeconds * 0.9) * 0.14;
 }
 
+// Fireflies: small warm lights that drift over the lawns and blink slowly, out only
+// at night (they follow the stars' fade, so they arrive at dusk and leave at dawn).
+// They are only a picture: they sit nowhere in the scene's rules, can't be clicked,
+// and the server knows nothing of them. Every browser draws its own, the same way.
+const FIREFLY_COUNT = 70;
+const fireflyUniforms = {
+  time: { value: 0 },
+  night: { value: 0 },
+  pixelsPerUnit: { value: 600 },
+};
+const fireflies = (() => {
+  const base = new Float32Array(FIREFLY_COUNT * 3);
+  const seeds = new Float32Array(FIREFLY_COUNT);
+  for (let i = 0; i < FIREFLY_COUNT; i++) {
+    // Most are over the shared garden's lawns and paths; a third gather round your own garden.
+    const nearOwn = i % 3 === 0;
+    const x = nearOwn ? OWN_CENTRE.x + (seeded(7100 + i) - 0.5) * 11 : -10 + seeded(7100 + i) * 34;
+    const z = nearOwn ? OWN_CENTRE.z + (seeded(7200 + i) - 0.5) * 11 : -20 + seeded(7200 + i) * 30;
+    base.set([x, 0.35 + seeded(7300 + i) * 1.7, z], i * 3);
+    seeds[i] = seeded(7400 + i) * 100;
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(base, 3));
+  geometry.setAttribute("seed", new THREE.BufferAttribute(seeds, 1));
+  const material = new THREE.ShaderMaterial({
+    uniforms: fireflyUniforms,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    vertexShader: `
+      attribute float seed;
+      uniform float time;
+      uniform float night;
+      uniform float pixelsPerUnit;
+      varying float glow;
+      void main() {
+        vec3 p = position;
+        // A wide, lazy wander, a quicker loop on top, and a small darting wobble.
+        float speed = 0.8 + fract(seed * 0.37) * 0.5;
+        p.x += sin(time * 0.6 * speed + seed) * 2.4 + sin(time * 1.5 * speed + seed * 2.0) * 0.6 + sin(time * 3.1 + seed * 4.0) * 0.12;
+        p.y += sin(time * 0.9 * speed + seed * 1.7) * 0.6 + sin(time * 2.3 + seed * 3.0) * 0.12;
+        p.z += cos(time * 0.5 * speed + seed * 1.3) * 2.4 + cos(time * 1.3 * speed + seed) * 0.6 + cos(time * 2.9 + seed * 5.0) * 0.12;
+        // Each one swells and fades on its own slow beat, and is dark between.
+        float beat = sin(time * (0.7 + fract(seed) * 0.6) + seed * 5.0);
+        glow = night * smoothstep(-0.35, 0.8, beat);
+        vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        gl_PointSize = max(0.1, 0.16 * pixelsPerUnit / -mv.z) * (0.6 + 0.4 * glow);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      varying float glow;
+      void main() {
+        float d = length(gl_PointCoord - 0.5) * 2.0;
+        float core = smoothstep(1.0, 0.0, d);
+        gl_FragColor = vec4(1.0, 0.92, 0.45, core * core * glow);
+      }`,
+  });
+  const points = new THREE.Points(geometry, material);
+  points.frustumCulled = false;
+  scene.add(points);
+  return points;
+})();
+const stillMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+function updateFireflies(timeSeconds) {
+  const night = stars.visible ? stars.material.opacity : 0;
+  fireflies.visible = night > 0.02;
+  if (!fireflies.visible) return;
+  fireflyUniforms.night.value = night;
+  // With reduced motion they hold still and only glow softly.
+  // The page's own clock, not the server's: the server's is about 1.7 billion seconds,
+  // too big for the shader's floats to move in steps smaller than a couple of minutes.
+  fireflyUniforms.time.value = stillMotion.matches ? 0 : performance.now() / 1000;
+  const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+  fireflyUniforms.pixelsPerUnit.value = size.y / (2 * Math.tan((camera.fov * Math.PI) / 360));
+}
+
 function animate() {
   requestAnimationFrame(animate);
   const now = performance.now();
@@ -4486,6 +4563,7 @@ function animate() {
   updateSky();
   updateClouds(serverNow() / 1000);
   updateInsects(serverNow() / 1000);
+  updateFireflies(serverNow() / 1000);
   updateCows(serverNow() / 1000);
   updateHills();
   updateCottage(serverNow() / 1000);
