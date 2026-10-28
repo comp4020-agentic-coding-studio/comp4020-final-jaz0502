@@ -2349,8 +2349,8 @@ let ownReturn = null; // where the camera was, to glide back to
 let ownSeeds = {};
 let ownSelected = null;
 const ownBar = document.getElementById("own-bar");
+const ownSeedLine = document.getElementById("own-seed");
 const ownPicker = document.getElementById("own-picker");
-const ownEmpty = document.getElementById("own-empty");
 const ownButtons = [document.getElementById("own-button"), document.getElementById("quick-own")];
 
 // The button that takes you to your garden takes you back to the shared one while you
@@ -2382,7 +2382,7 @@ function openOwnGarden() {
   document.body.classList.add("own-mode");
   ownBar.hidden = false;
   renderOwnButtons();
-  renderOwnPicker();
+  refreshSeeds();
   const target = new THREE.Vector3(OWN_CENTRE.x, controls.target.y, OWN_CENTRE.z);
   // Look in from the front, the side facing the shared garden.
   glideTo(target, target.clone().add(new THREE.Vector3(4.2, 5.2, 6.1)));
@@ -2396,6 +2396,7 @@ function closeOwnGarden() {
   document.body.classList.remove("own-mode");
   ownBar.hidden = true;
   renderOwnButtons();
+  refreshSeeds();
   if (ownReturn) glideTo(ownReturn.target, ownReturn.camera);
   clearStatusBarHover();
 }
@@ -2405,40 +2406,9 @@ for (const button of ownButtons) {
 }
 document.getElementById("own-back").addEventListener("click", closeOwnGarden);
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && ownMode && plotChoice.hidden && !photoMode) closeOwnGarden();
+  if (event.key === "Escape" && ownMode && plotChoice.hidden && bag.hidden && !photoMode) closeOwnGarden();
 });
 
-
-// The seeds you can plant here, as a picker. Each kind shows how many you have, and
-// there is no total.
-function renderOwnPicker() {
-  const kinds = Object.entries(ownSeeds).filter(([, count]) => count > 0);
-  if (!kinds.some(([type]) => type === ownSelected)) ownSelected = kinds[0]?.[0] ?? null;
-  ownEmpty.hidden = kinds.length > 0;
-  ownPicker.replaceChildren(
-    ...kinds.map(([type, count]) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.setAttribute("role", "radio");
-      button.setAttribute("aria-checked", String(type === ownSelected));
-      button.dataset.type = type;
-      const chip = document.createElement("span");
-      chip.className = `chip chip-${type}`;
-      const b = document.createElement("b");
-      b.textContent = String(count);
-      button.append(chip, `${PLANT_NAME[type]} `, b);
-      return button;
-    }),
-  );
-}
-
-ownPicker.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-type]");
-  if (!button) return;
-  ownSelected = button.dataset.type;
-  renderOwnPicker();
-  if (hoveredOwn !== null) refreshOwnHover(ownPlots.get(hoveredOwn));
-});
 
 function describeOwnPlot(plot) {
   if (plot.state === "empty") {
@@ -2881,29 +2851,177 @@ function renderStats(stats) {
 // The seeds you have gathered, for your own garden: what you have of each kind, as a
 // plain line. Like the record, only ever sent to you, and it shows no total.
 
-const youSeeds = document.getElementById("you-seeds");
-const youSeedsList = document.getElementById("you-seeds-list");
-
 function renderSeeds(seeds) {
   ownSeeds = seeds;
-  if (ownMode) renderOwnPicker();
-  const kinds = Object.entries(seeds).filter(([, count]) => count > 0);
-  youSeeds.hidden = kinds.length === 0;
-  youSeedsList.replaceChildren(
-    ...kinds.flatMap(([type, count], i) => {
-      const item = document.createElement("span");
-      item.append(`${PLANT_NAME[type]} `);
-      const b = document.createElement("b");
-      b.textContent = String(count);
-      item.append(b);
-      if (i === 0) return [item];
-      const dot = document.createElement("span");
-      dot.className = "dot";
-      dot.setAttribute("aria-hidden", "true");
-      dot.textContent = " · ";
-      return [dot, item];
+  refreshSeeds();
+}
+
+// Your bag: the seeds you have gathered, as seed packets. It lists what you hold and
+// how many of each, and nothing else: no total, no kinds you have not found, nothing
+// marked new. Opened from the Bag button, and in your own garden it is where you choose
+// which seed to plant.
+const bag = document.getElementById("bag");
+const bagList = document.getElementById("bag-list");
+const bagEmpty = document.getElementById("bag-empty");
+const bagButtons = [document.getElementById("bag-button"), document.getElementById("quick-bag")];
+let bagOpener = null;
+
+// A seed drawn from the sprite in the page: the shape and colour of that plant's real seed.
+function seedPicture(type, className) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 64 64");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  svg.setAttribute("class", className);
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", `#seed-${type}`);
+  svg.append(use);
+  return svg;
+}
+
+function seedKinds() {
+  return Object.entries(ownSeeds).filter(([, count]) => count > 0);
+}
+
+function refreshSeeds() {
+  const kinds = seedKinds();
+  if (!kinds.some(([type]) => type === ownSelected)) ownSelected = kinds[0]?.[0] ?? null;
+  bagEmpty.hidden = kinds.length > 0;
+  bagList.hidden = kinds.length === 0;
+  bagList.replaceChildren(
+    ...kinds.map(([type, count]) => {
+      // In your own garden a packet is a choice of what to plant; elsewhere it is just
+      // something you are holding.
+      const packet = document.createElement(ownMode ? "button" : "div");
+      packet.className = "packet";
+      packet.dataset.type = type;
+      if (ownMode) {
+        packet.type = "button";
+        packet.setAttribute("role", "radio");
+        packet.setAttribute("aria-checked", String(type === ownSelected));
+      } else {
+        packet.setAttribute("role", "listitem");
+      }
+      packet.setAttribute("aria-label", `${PLANT_NAME[type]} seeds, ${count}`);
+      const picture = seedPicture(type, "packet-picture");
+      const name = document.createElement("span");
+      name.className = "packet-name";
+      name.textContent = PLANT_NAME[type];
+      const amount = document.createElement("span");
+      amount.className = "packet-count";
+      amount.textContent = `× ${count}`;
+      packet.append(picture, name, amount);
+      return packet;
     }),
   );
+  bagList.setAttribute("role", ownMode ? "radiogroup" : "list");
+  // The same choice under the title, like "What to plant" in the shared garden: only
+  // the seeds you hold, and picking one here or in the bag picks it in both.
+  ownSeedLine.hidden = kinds.length > 0;
+  ownSeedLine.textContent = "You have no seeds yet. Gather some from a fully grown plant in the shared garden.";
+  ownPicker.hidden = kinds.length === 0;
+  ownPicker.replaceChildren(
+    ...kinds.map(([type, count]) => {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.dataset.type = type;
+      option.setAttribute("role", "radio");
+      option.setAttribute("aria-checked", String(type === ownSelected));
+      option.setAttribute("aria-label", `${PLANT_NAME[type]} seeds, ${count}`);
+      const name = document.createElement("span");
+      name.textContent = PLANT_NAME[type];
+      const amount = document.createElement("span");
+      amount.className = "own-option-count";
+      amount.textContent = `× ${count}`;
+      option.append(seedPicture(type, "own-option-seed"), name, amount);
+      return option;
+    }),
+  );
+  if (hoveredOwn !== null) refreshOwnHover(ownPlots.get(hoveredOwn));
+}
+
+bagList.addEventListener("click", (event) => {
+  const packet = event.target.closest("button[data-type]");
+  if (!packet) return;
+  ownSelected = packet.dataset.type;
+  refreshSeeds();
+  bagList.querySelector(`[data-type="${ownSelected}"]`)?.focus({ preventScroll: true });
+});
+
+ownPicker.addEventListener("click", (event) => {
+  const option = event.target.closest("button[data-type]");
+  if (!option) return;
+  ownSelected = option.dataset.type;
+  refreshSeeds();
+  ownPicker.querySelector(`[data-type="${ownSelected}"]`)?.focus({ preventScroll: true });
+});
+
+function openBag(opener) {
+  closePlotChoice();
+  bagOpener = opener;
+  bag.hidden = false;
+  for (const button of bagButtons) button.setAttribute("aria-expanded", "true");
+  (bagList.querySelector("[aria-checked=true]") ?? document.getElementById("bag-close")).focus({ preventScroll: true });
+}
+
+function closeBag() {
+  if (bag.hidden) return;
+  bag.hidden = true;
+  for (const button of bagButtons) button.setAttribute("aria-expanded", "false");
+  const back = bagOpener && bagOpener.isConnected && bagOpener.offsetParent !== null ? bagOpener : bagButtons.find((b) => b.offsetParent !== null);
+  back?.focus({ preventScroll: true });
+}
+
+for (const button of bagButtons) button.addEventListener("click", () => (bag.hidden ? openBag(button) : closeBag()));
+document.getElementById("bag-close").addEventListener("click", closeBag);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !bag.hidden && plotChoice.hidden && !photoMode) closeBag();
+});
+
+// A gathered plant's seeds fly from it into the bag, which gives a little shake. It
+// is only a picture of what the server has already said, and plays only for you.
+function shakeBag(button) {
+  button.animate(
+    [{ transform: "scale(1)" }, { transform: "scale(1.12) rotate(-4deg)" }, { transform: "scale(1.06) rotate(3deg)" }, { transform: "scale(1)" }],
+    { duration: 420, easing: "ease-out" },
+  );
+}
+
+function flySeedsToBag(position, type, count) {
+  const target = bagButtons.find((button) => button.offsetParent !== null);
+  if (!target) return;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    shakeBag(target);
+    return;
+  }
+  const rect = renderer.domElement.getBoundingClientRect();
+  const spot = worldPosition(position);
+  const screen = new THREE.Vector3(spot.x, 0.5, spot.z).project(camera);
+  const x0 = rect.left + ((screen.x + 1) / 2) * rect.width;
+  const y0 = rect.top + ((1 - screen.y) / 2) * rect.height;
+  const box = target.getBoundingClientRect();
+  const x1 = box.left + box.width / 2;
+  const y1 = box.top + box.height / 2;
+  for (let i = 0; i < count; i++) {
+    const seed = seedPicture(type, "fly-seed");
+    document.body.append(seed);
+    const rise = 60 + i * 22;
+    const animation = seed.animate(
+      [
+        { transform: `translate(${x0}px, ${y0}px) scale(0.5)`, opacity: 0 },
+        { transform: `translate(${x0 + (i - 1) * 16}px, ${y0 - rise}px) scale(1.15)`, opacity: 1, offset: 0.3 },
+        { transform: `translate(${x1}px, ${y1}px) scale(0.45)`, opacity: 0.9 },
+      ],
+      { duration: 800, delay: i * 120, easing: "ease-in", fill: "backwards" },
+    );
+    animation.finished.then(
+      () => {
+        seed.remove();
+        if (i === count - 1) shakeBag(target);
+      },
+      () => seed.remove(),
+    );
+  }
 }
 
 // The recent list: the last few things gardeners did, newest first. The server
@@ -3025,6 +3143,7 @@ async function handlePointerClick(event) {
   if (photoMode) return; // the camera only looks: nothing in the garden is touched
   closePlotChoice();
   if (ownMode) return ownClick(event);
+  closeBag();
   raycaster.setFromCamera(ndcFromEvent(event), camera);
   const hit = raycaster.intersectObjects(soilMeshes, false)[0];
   if (!hit) {
@@ -3089,6 +3208,7 @@ async function sendAction(position, action) {
       // show it: say what you got. Your seeds arrive on your own stream.
       const name = PLANT_NAME[body.type ?? "tree"].toLowerCase();
       showStatusMessage(`You gathered ${body.gained} ${name} seed${body.gained === 1 ? "" : "s"}`);
+      flySeedsToBag(position, body.type ?? "tree", body.gained);
     }
   } catch {
     showStatusMessage("Couldn't reach the server — try again.");
@@ -3307,6 +3427,7 @@ function setPhotoShape(shape) {
 
 function openPhotoMode() {
   closePlotChoice();
+  closeBag();
   if (photoMode) return;
   photoMode = true;
   clearHoveredPlot();
