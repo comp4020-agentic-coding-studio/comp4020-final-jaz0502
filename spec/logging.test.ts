@@ -23,6 +23,7 @@ describe("the server's log", () => {
     await alice.post(0, "plant", { type: "lavender" });
     await alice.post(0, "water");
 
+    await app.settled();
     const lines = linesFor(id);
     expect(lines).toContain(`who=${id} hue=${parseInt(id.slice(0, 6), 16) % 360} did=plant plot=0 type=lavender result=ok`);
     expect(lines.some((l) => l.includes("did=water plot=0 result=ok"))).toBe(true);
@@ -38,6 +39,7 @@ describe("the server's log", () => {
     await alice.post(2, "compost"); // not wilted
     await alice.post(3, "plant", { type: "cactus" }); // not a plant type
 
+    await app.settled();
     const lines = linesFor(id);
     const has = (text: string) => lines.some((l) => l.includes(text));
     expect(has("did=water plot=1 result=refused reason=empty")).toBe(true);
@@ -58,6 +60,7 @@ describe("the server's log", () => {
       stream.close();
     }
 
+    await app.settled();
     const lines = linesFor(id);
     expect(lines.some((l) => l.includes("did=wave result=ok"))).toBe(true);
     expect(lines.some((l) => l.includes("did=wave result=refused reason=too-fast"))).toBe(true);
@@ -88,6 +91,7 @@ describe("the server's log", () => {
     await first.waitFor((f) => f.event === "presence");
     const second = await openStream(app.url, alice.gid);
     await second.waitFor((f) => f.event === "presence");
+    await app.settled();
     expect(did("join")).toHaveLength(1);
     expect(did("join")[0]).toMatch(/gardeners=\d+$/);
 
@@ -109,6 +113,7 @@ describe("the server's log", () => {
       await v.post(10 + i, "compost");
     }
 
+    await app.settled();
     const everything = app.logs().join("\n");
     for (const v of visitors) {
       expect(everything).not.toContain(v.gid);

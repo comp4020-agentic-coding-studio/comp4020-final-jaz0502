@@ -24,10 +24,28 @@ export const fresh = { connection: "close" };
 // server. spec/plant-limit.test.ts is the one that tests it.
 export const NO_PLANT_LIMIT = { PLANT_LIMIT: "100000", PLANT_BED_LIMIT: "100000" };
 
+// Waits for something to become true by looking again and again, instead of sleeping a
+// guessed time. A fixed sleep is right on a quiet machine and wrong on a busy one, and
+// CI is the busy one; this takes as long as it takes, up to the limit.
+export async function waitUntil<T>(read: () => Promise<T>, done: (value: T) => boolean, timeoutMs = 15_000): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = await read();
+    if (done(value)) return value;
+    if (Date.now() > deadline) throw new Error(`still waiting after ${timeoutMs}ms; last saw ${JSON.stringify(value)}`);
+    await sleep(40);
+  }
+}
+
 export interface PrivateApp {
   url: string;
   // Everything the server has written to its log so far, one string per line.
   logs: () => string[];
+  // Resolves once the server has stopped writing for a moment. The server logs a line
+  // before it answers, but the log and the answer reach the spec on different pipes,
+  // so a spec that reads the log the instant a request returns can miss the last line.
+  // Call this before asserting that a line is there.
+  settled: () => Promise<void>;
   stop: () => Promise<void>;
 }
 
@@ -69,13 +87,21 @@ export async function startApp(env: Record<string, string>): Promise<PrivateApp>
     } catch {
       // not up yet
     }
-    if (attempt > 100) throw new Error(`private app never answered at ${url}:\n${stderr}`);
+    // 30 s: a busy CI machine can take much longer than a quiet one to start Node.
+    if (attempt > 300) throw new Error(`private app never answered at ${url}:\n${stderr}`);
     await sleep(100);
   }
 
   return {
     url,
     logs: () => stdout.split("\n").filter((line) => line !== ""),
+    settled: async () => {
+      let size = -1;
+      while (size !== stdout.length) {
+        size = stdout.length;
+        await sleep(100);
+      }
+    },
     stop: async () => {
       const exited = new Promise((resolve) => child.once("exit", resolve));
       child.kill();

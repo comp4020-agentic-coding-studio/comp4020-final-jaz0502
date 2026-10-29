@@ -1,12 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { publicId } from "../src/identity.ts";
-import { newVisitor, plantFor, readPlots, sleep, startApp, type PrivateApp, NO_PLANT_LIMIT } from "./support.ts";
+import { newVisitor, plantFor, readPlots, sleep, startApp, waitUntil, type PrivateApp, NO_PLANT_LIMIT } from "./support.ts";
 
 // How often one gardener may act on a plot: a budget in a window of time, checked
 // on the server and counted per person. A private server with a small budget and a
 // short window, so it can be tried in a moment.
 const LIMIT = 5;
-const WINDOW_MS = 1500;
+const WINDOW_MS = 5000;
 
 let app: PrivateApp;
 beforeAll(async () => {
@@ -62,13 +62,15 @@ describe("the limit on plot actions", () => {
     expect((await alice.post(20, "plant", { type: plantFor(20) })).status).toBe(429);
   });
 
-  it("lets a person act again once the window has passed", { timeout: 15_000 }, async () => {
+  it("lets a person act again once the window has passed", { timeout: 30_000 }, async () => {
     const alice = newVisitor(app.url);
     await statuses(alice, [5, 6, 7, 8, 9]);
     expect((await alice.post(24, "plant", { type: plantFor(24) })).status).toBe(429);
 
-    await sleep(WINDOW_MS + 300);
-    expect((await alice.post(24, "plant", { type: plantFor(24) })).status).toBe(200);
+    await waitUntil(
+      async () => (await alice.post(24, "plant", { type: plantFor(24) })).status,
+      (status) => status === 200,
+    );
   });
 
   it("is each person's own: one person's flood never stops another", async () => {
@@ -94,6 +96,7 @@ describe("what the limit writes to the log", () => {
     const alice = newVisitor(app.url);
     await statuses(alice, [60, 61, 62, 63, 64, 65, 66, 67, 68, 69]);
 
+    await app.settled();
     const limited = app.logs().filter((l) => l.startsWith(`who=${publicId(alice.gid)} `) && l.includes("reason=rate-limited"));
     expect(limited).toHaveLength(1);
     expect(limited[0]).toContain("result=refused");

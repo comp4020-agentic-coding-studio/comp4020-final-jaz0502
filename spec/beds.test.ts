@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { publicId } from "../src/identity.ts";
-import { type PrivateApp, newVisitor, openStream, readPlots, sleep, startApp } from "./support.ts";
+import { type PrivateApp, newVisitor, openStream, readPlots, sleep, startApp, waitUntil } from "./support.ts";
 
 // Each bed takes only what it is for. The server decides, so a request sent by hand
 // gets the same answer as a click in the page. Only planting is restricted: anyone
@@ -12,11 +12,16 @@ const FRUIT_GARDEN = [50, 74];
 const VEGETABLE_GARDEN = [75, 99];
 
 let app: PrivateApp;
+// Only the check that composts needs a plant to wilt, so it has its own server and the
+// rest never see a plant wilt, however slow the machine is.
+let wilting: PrivateApp;
 beforeAll(async () => {
-  app = await startApp({ WILT_WINDOW_MS: "1500", ACTION_LIMIT: "1000" });
+  app = await startApp({ WILT_WINDOW_MS: "1000000", ACTION_LIMIT: "1000" });
+  wilting = await startApp({ WILT_WINDOW_MS: "4000", ACTION_LIMIT: "1000" });
 });
 afterAll(async () => {
   await app.stop();
+  await wilting.stop();
 });
 
 const plotAt = async (position: number) => (await readPlots(app.url)).find((p) => p.position === position)!;
@@ -53,15 +58,15 @@ describe("The Flower Garden", () => {
     expect((await alice.post(FLOWER_GARDEN[1] + 1, "plant", { type: "tree" })).status).toBe(200);
   });
 
-  it("lets anyone water and compost there, as in any bed", { timeout: 15_000 }, async () => {
-    const alice = newVisitor(app.url);
-    const bob = newVisitor(app.url);
+  it("lets anyone water and compost there, as in any bed", { timeout: 30_000 }, async () => {
+    const alice = newVisitor(wilting.url);
+    const bob = newVisitor(wilting.url);
     await alice.post(35, "plant", { type: "flower" });
     expect((await bob.post(35, "water")).status).toBe(200);
 
-    await sleep(1800);
+    await waitUntil(() => readPlots(wilting.url), (plots) => plots[35].state === "wilted");
     expect((await bob.post(35, "compost")).status).toBe(200);
-    expect((await plotAt(35)).state).toBe("empty");
+    expect((await readPlots(wilting.url))[35].state).toBe("empty");
   });
 });
 
@@ -161,6 +166,7 @@ describe("what a turned-away plant leaves behind", () => {
     const alice = newVisitor(app.url);
     await alice.post(40, "plant", { type: "tree" });
 
+    await app.settled();
     const lines = app.logs().filter((l) => l.startsWith(`who=${publicId(alice.gid)} `));
     expect(lines.some((l) => l.includes("did=plant plot=40 type=tree result=refused reason=wrong-bed"))).toBe(true);
     expect(app.logs().join("\n")).not.toContain(alice.gid);

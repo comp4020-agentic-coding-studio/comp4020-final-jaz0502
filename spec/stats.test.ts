@@ -4,7 +4,7 @@ import { join as joinPath } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { publicId } from "../src/identity.ts";
-import { newVisitor, openStream, plantFor, sleep, startApp, type PrivateApp, type SseFrame, type Stream } from "./support.ts";
+import { newVisitor, openStream, plantFor, readPlots, sleep, startApp, waitUntil, type PrivateApp, type SseFrame, type Stream } from "./support.ts";
 
 // A gardener's own record of what they have planted, watered and composted. It
 // is a record, not a score: it goes to that gardener and nobody else, and is never
@@ -40,13 +40,13 @@ const hasCounts = (planted: number, watered: number, composted: number) => (f: S
 describe("a gardener's record", () => {
   let app: PrivateApp;
   beforeAll(async () => {
-    app = await startApp({ WILT_WINDOW_MS: "1500" });
+    app = await startApp({ WILT_WINDOW_MS: "4000" });
   });
   afterAll(async () => {
     await app.stop();
   });
 
-  it("counts what they plant, water and compost, and only what succeeds", { timeout: 15_000 }, async () => {
+  it("counts what they plant, water and compost, and only what succeeds", { timeout: 30_000 }, async () => {
     const alice = newVisitor(app.url);
     const stream = await join(app, alice.gid);
     expect(statsFrames(stream)[0]).toEqual({ planted: 0, watered: 0, composted: 0, since: null });
@@ -63,7 +63,7 @@ describe("a gardener's record", () => {
 
     // Composting needs a plot that has wilted.
     await alice.post(2, "plant", { type: plantFor(2) });
-    await sleep(1800);
+    await waitUntil(() => readPlots(app.url), (plots) => plots[2].state === "wilted");
     expect((await alice.post(2, "compost")).status).toBe(200);
     const last = await stream.waitFor(hasCounts(3, 1, 1));
     expect(typeof (last.data as Stats).since).toBe("number");

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { publicId } from "../src/identity.ts";
-import { newVisitor, plantFor, readPlots, sleep, startApp, type PrivateApp } from "./support.ts";
+import { newVisitor, plantFor, readPlots, sleep, startApp, waitUntil, type PrivateApp } from "./support.ts";
 
 // How much one person may plant in the shared garden: so many plantings in a rolling
 // window of time, and only so many of those in one bed, so nobody takes over a bed
@@ -8,7 +8,7 @@ import { newVisitor, plantFor, readPlots, sleep, startApp, type PrivateApp } fro
 // can be tried in a moment. The action limit is set high so it never gets in the way.
 const TOTAL = 4;
 const PER_BED = 2;
-const WINDOW_MS = 2500;
+const WINDOW_MS = 6000;
 
 let app: PrivateApp;
 beforeAll(async () => {
@@ -57,7 +57,7 @@ describe("the limit on planting", () => {
     expect((await plant(bob, 13)).status).toBe(200);
   });
 
-  it("comes back as the window passes, and only watering and composting are not limited", { timeout: 15_000 }, async () => {
+  it("comes back as the window passes, and only watering and composting are not limited", { timeout: 30_000 }, async () => {
     const alice = newVisitor(app.url);
     await plant(alice, 15);
     await plant(alice, 16);
@@ -65,8 +65,7 @@ describe("the limit on planting", () => {
     // Watering is not planting: it is not held back.
     expect((await alice.post(15, "water")).status).toBe(200);
 
-    await sleep(WINDOW_MS + 300);
-    expect((await plant(alice, 17)).status).toBe(200);
+    await waitUntil(async () => (await plant(alice, 17)).status, (status) => status === 200);
   });
 
   it("counts only what was planted: a refused planting costs nothing", async () => {
@@ -97,6 +96,7 @@ describe("the limit on planting", () => {
     for (const plot of [70, 71]) await plant(alice, plot);
     await plant(alice, 90);
 
+    await app.settled();
     const lines = app.logs().filter((l) => l.includes(`who=${publicId(alice.gid)} `));
     expect(lines.some((l) => l.includes("did=plant plot=42") && l.includes("result=refused reason=bed-limit"))).toBe(true);
     expect(lines.some((l) => l.includes("did=plant plot=90") && l.includes("result=refused reason=plant-limit"))).toBe(true);

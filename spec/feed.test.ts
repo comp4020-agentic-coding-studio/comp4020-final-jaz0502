@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { publicId } from "../src/identity.ts";
-import { newVisitor, openStream, plantFor, postWave, sleep, startApp, type PrivateApp, type Stream, NO_PLANT_LIMIT } from "./support.ts";
+import { newVisitor, openStream, plantFor, postWave, readPlots, sleep, startApp, waitUntil, type PrivateApp, type Stream, NO_PLANT_LIMIT } from "./support.ts";
 
 // A short list of what gardeners have just done. It is a glance at what just
 // happened, not a history or a tally. Each test uses its own private copy of the
@@ -15,7 +15,7 @@ interface Entry {
 let app: PrivateApp;
 const open: Stream[] = [];
 beforeEach(async () => {
-  app = await startApp({ WILT_WINDOW_MS: "1500", ...NO_PLANT_LIMIT });
+  app = await startApp({ WILT_WINDOW_MS: "4000", ...NO_PLANT_LIMIT });
 });
 afterEach(async () => {
   for (const stream of open.splice(0)) stream.close();
@@ -47,12 +47,12 @@ describe("the recent feed", () => {
     ]);
   });
 
-  it("includes composting, which stores no one's name on the plot", { timeout: 15_000 }, async () => {
+  it("includes composting, which stores no one's name on the plot", { timeout: 30_000 }, async () => {
     const alice = newVisitor(app.url);
     const bobStream = await join(newVisitor(app.url).gid);
 
     await alice.post(6, "plant", { type: plantFor(6) });
-    await sleep(1800);
+    await waitUntil(() => readPlots(app.url), (plots) => plots[6].state === "wilted");
     expect((await alice.post(6, "compost")).status).toBe(200);
 
     const frame = await bobStream.waitFor((f) => f.event === "activity" && (f.data as Entry).did === "compost");

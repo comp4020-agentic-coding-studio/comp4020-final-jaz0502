@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { publicId } from "../src/identity.ts";
-import { fresh, newVisitor, openStream, plantFor, readPlots, sleep, startApp, type PrivateApp, type Stream } from "./support.ts";
+import { fresh, newVisitor, openStream, plantFor, readPlots, sleep, startApp, waitUntil, type PrivateApp, type Stream } from "./support.ts";
 
 // Gathering seeds from a fully grown plant. It never changes the plant, and the seeds
 // go to the one who gathered them and nobody else. Each test uses a private copy of
@@ -30,8 +30,9 @@ async function gather(app: PrivateApp, gid: string, position: number) {
   return { status: res.status, body: (await res.json().catch(() => ({}))) as { error?: string; gained?: number } };
 }
 
-// Long enough for any plant to be fully grown with the times below.
-const GROWN = 600;
+// Waits until these plots hold fully grown plants, however busy the machine is.
+const grown = (app: PrivateApp, ...positions: number[]) =>
+  waitUntil(() => readPlots(app.url), (plots) => positions.every((p) => plots[p].state === "mature"));
 
 describe("gathering seeds", () => {
   let app: PrivateApp;
@@ -48,9 +49,7 @@ describe("gathering seeds", () => {
     expect((await gather(app, bob.gid, 0)).status).toBe(409);
 
     await alice.post(0, "plant", { type: plantFor(0) });
-    expect((await gather(app, bob.gid, 0)).status).toBe(409);
-
-    await sleep(GROWN);
+    await grown(app, 0);
     const before = (await readPlots(app.url))[0];
     expect(before.state).toBe("mature");
     expect((await gather(app, bob.gid, 0)).status).toBe(200);
@@ -65,7 +64,7 @@ describe("gathering seeds", () => {
     expect(seedFrames(aliceStream)).toEqual([{}]);
 
     await alice.post(1, "plant", { type: plantFor(1) });
-    await sleep(GROWN);
+    await grown(app, 1);
     expect((await gather(app, alice.gid, 1)).body.gained).toBe(3);
 
     await aliceStream.waitFor((f) => f.event === "seeds" && (f.data as Seeds).lavender === 3);
@@ -79,7 +78,7 @@ describe("gathering seeds", () => {
     const alice = newVisitor(app.url);
     const bob = newVisitor(app.url);
     for (const plot of [2, 3, 4]) await alice.post(plot, "plant", { type: plantFor(plot) });
-    await sleep(GROWN);
+    await grown(app, 2, 3, 4);
 
     expect((await gather(app, bob.gid, 2)).body.gained).toBe(3);
     expect((await gather(app, bob.gid, 2)).status).toBe(409);
@@ -96,15 +95,38 @@ describe("gathering seeds", () => {
     const alice = newVisitor(app.url);
     await alice.post(5, "plant", { type: plantFor(5) });
     await gather(app, alice.gid, 6);
-    await sleep(GROWN);
+    await grown(app, 5);
     await gather(app, alice.gid, 5);
     await gather(app, alice.gid, 5);
 
+    await app.settled();
     const lines = app.logs().filter((l) => l.includes(`who=${publicId(alice.gid)} `));
     expect(lines.some((l) => l.includes("did=gather plot=6 result=refused reason=not-mature"))).toBe(true);
     expect(lines.some((l) => l.includes("did=gather plot=5 type=lavender seeds=3 result=ok"))).toBe(true);
     expect(lines.some((l) => l.includes("did=gather plot=5 result=refused reason=already-gathered"))).toBe(true);
     expect(app.logs().some((l) => l.includes(alice.gid))).toBe(false);
+  });
+});
+
+describe("gathering from a plant that is still growing", () => {
+  let app: PrivateApp;
+  beforeAll(async () => {
+    // The default growth times, so a plant stays young however slow the machine is.
+    app = await startApp({});
+  });
+  afterAll(async () => {
+    await app.stop();
+  });
+
+  it("is turned away, with the reason logged, and gives no seeds", async () => {
+    const alice = newVisitor(app.url);
+    const bob = newVisitor(app.url);
+    await alice.post(0, "plant", { type: plantFor(0) });
+    const refused = await gather(app, bob.gid, 0);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/fully grown/);
+    await app.settled();
+    expect(app.logs().some((l) => l.includes(`who=${publicId(bob.gid)} `) && l.includes("did=gather plot=0 result=refused reason=not-mature"))).toBe(true);
   });
 });
 

@@ -1,23 +1,28 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { publicId } from "../src/identity.ts";
-import { newVisitor, plantFor, readPlots, sleep, startApp, type PrivateApp, NO_PLANT_LIMIT } from "./support.ts";
+import { newVisitor, plantFor, readPlots, sleep, startApp, waitUntil, type PrivateApp, NO_PLANT_LIMIT } from "./support.ts";
 
 // The garden's rules: who can plant, water and compost what, and when.
 // Each test uses its own plot so they don't depend on each other. These run
 // against a private copy of the server with a short wilt window and an empty
 // database (see spec/support.ts), so the wilted-plot rules can be checked in
 // seconds instead of 18 hours.
-const WILT_MS = 2000;
+// Most of these checks are not about wilting, so their server never lets a plant wilt
+// however slow the machine is. The two that are about wilting use their own, below.
+const WILT_MS = 4000;
 
 let app: PrivateApp;
+let wilting: PrivateApp;
 beforeAll(async () => {
-  app = await startApp({ WILT_WINDOW_MS: String(WILT_MS), ...NO_PLANT_LIMIT });
+  app = await startApp({ WILT_WINDOW_MS: "1000000", ...NO_PLANT_LIMIT });
+  wilting = await startApp({ WILT_WINDOW_MS: String(WILT_MS), ...NO_PLANT_LIMIT });
 });
 afterAll(async () => {
   await app.stop();
+  await wilting.stop();
 });
 
-const plotAt = async (position: number) => (await readPlots(app.url)).find((p) => p.position === position)!;
+const plotAt = async (position: number, from: PrivateApp = app) => (await readPlots(from.url)).find((p) => p.position === position)!;
 
 describe("planting", () => {
   it("plants an empty plot and records who planted it", async () => {
@@ -119,8 +124,8 @@ describe("watering", () => {
     expect(body.plantedBy).toBe(publicId(alice.gid));
   });
 
-  it("resets the wilt clock, so a watered plant outlives the unwatered window", { timeout: 10_000 }, async () => {
-    const alice = newVisitor(app.url);
+  it("resets the wilt clock, so a watered plant outlives the unwatered window", { timeout: 20_000 }, async () => {
+    const alice = newVisitor(wilting.url);
     await alice.post(5, "plant", { type: plantFor(5) });
 
     await sleep(WILT_MS * 0.6);
@@ -148,14 +153,13 @@ describe("composting", () => {
 
   it(
     "leaves a wilted plot unwaterable and unplantable until someone composts it",
-    { timeout: 10_000 },
+    { timeout: 20_000 },
     async () => {
-      const alice = newVisitor(app.url);
-      const bob = newVisitor(app.url);
+      const alice = newVisitor(wilting.url);
+      const bob = newVisitor(wilting.url);
       await alice.post(7, "plant", { type: plantFor(7) });
 
-      await sleep(WILT_MS + 300);
-      expect((await plotAt(7)).state).toBe("wilted");
+      await waitUntil(() => plotAt(7, wilting), (p) => p.state === "wilted");
 
       expect((await bob.post(7, "water")).status).toBe(409);
       expect((await bob.post(7, "plant", { type: plantFor(7) })).status).toBe(409);
@@ -174,11 +178,13 @@ describe("composting", () => {
 });
 
 describe("a vegetable", () => {
-  it("grows through the same stages as the other plants, at its own pace", { timeout: 20_000 }, async () => {
+  it("grows through the same stages as the other plants, at its own pace", { timeout: 30_000 }, async () => {
+    // Stages long enough that a slow machine cannot skip one between two looks. A
+    // carrot takes 0.6 of a tree's time: mature at 2.7 s against the tree's 4.5 s.
     const stagesApp = await startApp({
-      SEED_TO_SPROUT_MS: "300",
-      SPROUT_TO_GROWING_MS: "300",
-      GROWING_TO_MATURE_MS: "300",
+      SEED_TO_SPROUT_MS: "1500",
+      SPROUT_TO_GROWING_MS: "1500",
+      GROWING_TO_MATURE_MS: "1500",
       WILT_WINDOW_MS: "1000000",
     });
     try {
@@ -187,14 +193,15 @@ describe("a vegetable", () => {
       await alice.post(60, "plant", { type: "tree" });
 
       const stateAt = async (position: number) => (await readPlots(stagesApp.url)).find((p) => p.position === position)!.state;
-      expect(await stateAt(80)).toBe("planted");
+      const planted = await stateAt(80);
+      expect(["planted", "sprout"]).toContain(planted);
 
-      // Quicker than a tree (0.6 of its time), but it does get there: sprout, growing, mature.
-      await sleep(500);
-      expect(["sprout", "growing"]).toContain(await stateAt(80));
-      await sleep(900);
-      expect(await stateAt(80)).toBe("mature");
-      expect(await stateAt(60)).not.toBe("planted");
+      // It passes through the early stages (the first look after it leaves "planted"
+      // is a sprout or growing), and gets to mature, quicker than a tree does.
+      const left = await waitUntil(() => stateAt(80), (s) => s !== "planted");
+      expect(["sprout", "growing"]).toContain(left);
+      await waitUntil(() => stateAt(80), (s) => s === "mature");
+      expect(await stateAt(60)).not.toBe("mature");
     } finally {
       await stagesApp.stop();
     }

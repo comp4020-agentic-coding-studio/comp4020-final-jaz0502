@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { publicId } from "../src/identity.ts";
-import { fresh, newVisitor, openStream, plantFor, readPlots, sleep, startApp, type PrivateApp, type Stream } from "./support.ts";
+import { fresh, newVisitor, openStream, plantFor, readPlots, sleep, startApp, waitUntil, type PrivateApp, type Stream } from "./support.ts";
 
 // Each gardener's own garden, grown from seeds they gathered. Only they can act on
 // it and only they are ever told about it. Each test uses a private copy of the
@@ -45,7 +45,7 @@ async function withSeeds(app: PrivateApp, plot: number) {
   const gardener = newVisitor(app.url);
   const planted = await gardener.post(plot, "plant", { type: plantFor(plot) });
   expect(planted.status, JSON.stringify(planted.body)).toBe(200);
-  await sleep(GROWN);
+  await waitUntil(() => readPlots(app.url), (plots) => plots[plot].state === "mature");
   const res = await gather(app, gardener.gid, plot);
   expect(res.status, await res.text()).toBe(200);
   return gardener;
@@ -123,6 +123,7 @@ describe("a gardener's own garden", () => {
     await own(app, alice.gid, 2, "plant", { type: "tulip" });
     await own(app, alice.gid, 2, "water");
 
+    await app.settled();
     const lines = app.logs().filter((l) => l.includes(`who=${publicId(alice.gid)} `));
     expect(lines.some((l) => l.includes("did=plant garden=own plot=1 type=lavender result=ok"))).toBe(true);
     expect(lines.some((l) => l.includes("did=plant garden=own plot=2 result=refused reason=unknown-type"))).toBe(true);
