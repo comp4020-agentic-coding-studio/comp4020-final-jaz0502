@@ -17,6 +17,9 @@ export interface Hello {
   serverNow: number;
   // Each bed's name and what it takes (null for any plant), in plot order.
   beds: { name: string; takes: readonly PlantType[] | null }[];
+  // The decorations there are, in the order they are unlocked, so the page never keeps
+  // its own copy of the list.
+  decorations: { id: string; name: string; kind: "fence" | "prop" }[];
 }
 
 type SseEvent =

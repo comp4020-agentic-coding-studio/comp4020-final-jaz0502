@@ -65,6 +65,13 @@ describe("unlocking decorations by watering the shared garden", () => {
     await app.stop();
   });
 
+  it("tells the page the fixed list, in the order it is unlocked", async () => {
+    const stream = await join(app, newVisitor(app.url).gid);
+    const hello = stream.frames.find((f) => f.event === "hello")!.data as { decorations: { id: string; kind: string }[] };
+    expect(hello.decorations.map((d) => d.id)).toEqual(["bench", "picket", "lantern", "scarecrow", "rustic", "gnome", "birdbath", "stone"]);
+    expect(hello.decorations.filter((d) => d.kind === "fence").map((d) => d.id)).toEqual(["picket", "rustic", "stone"]);
+  });
+
   it("starts with nothing unlocked and says how many waterings until the first", async () => {
     const stream = await join(app, newVisitor(app.url).gid);
     expect(frames(stream)).toEqual([{ unlocked: [], nextIn: 2, placed: {} }]);
@@ -190,6 +197,24 @@ describe("placing decorations", () => {
     expect((await decorate(app, alice.gid, { spot: "prop-0", decoration: "picket" })).status).toBe(400);
     expect((await decorate(app, alice.gid, { spot: "prop-9", decoration: "bench" })).status).toBe(400);
     expect((await decorate(app, alice.gid, { spot: "prop-0", decoration: "nothing" })).status).toBe(400);
+  });
+
+  it("has a spot for every prop, so all five can stand at once", async () => {
+    const alice = newVisitor(app.url);
+    const stream = await join(app, alice.gid);
+    // Eight decorations take sixteen waterings at two a time.
+    const plots = Array.from({ length: 16 }, (_, i) => i);
+    await plantRested(alice, plots, SHORT_GAP);
+    for (const plot of plots) await alice.post(plot, "water");
+    await stream.waitFor((f) => f.event === "decorations" && (f.data as Decorations).unlocked.length === 8);
+
+    const props = ["bench", "lantern", "scarecrow", "gnome", "birdbath"];
+    for (const [i, prop] of props.entries()) {
+      expect((await decorate(app, alice.gid, { spot: `prop-${i}`, decoration: prop })).status).toBe(200);
+    }
+    expect(Object.keys(frames(await join(app, alice.gid))[0].placed).sort()).toEqual(["prop-0", "prop-1", "prop-2", "prop-3", "prop-4"]);
+    // And no more spots than that.
+    expect((await decorate(app, alice.gid, { spot: "prop-5", decoration: "bench" })).status).toBe(400);
   });
 
   it("only changes how your own garden looks, never the shared garden", async () => {

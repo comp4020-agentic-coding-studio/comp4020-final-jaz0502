@@ -24,7 +24,9 @@ export const DECORATIONS: readonly Decoration[] = [
 ];
 
 // Where a decoration can go: one spot for a fence, and a few for props.
-export const PROP_SPOTS = 4;
+// One for each prop, so all five can stand at once. The page draws a place for each
+// (OWN_PROP_SPOTS in public/app.js), so the two stay the same length.
+export const PROP_SPOTS = 5;
 export const SPOTS: readonly string[] = ["fence", ...Array.from({ length: PROP_SPOTS }, (_, i) => `prop-${i}`)];
 
 // Env-overridable so specs can use a small number and a short gap.

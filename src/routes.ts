@@ -196,6 +196,7 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
         dayLengthMs: DAY_LENGTH_MS,
         serverNow: Date.now(),
         beds: BEDS.map(({ name, takes }) => ({ name, takes })),
+        decorations: DECORATIONS.map(({ id, name, kind }) => ({ id, name, kind })),
       },
       publicId(identity),
       db.getStats(publicId(identity)),

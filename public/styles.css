@@ -898,6 +898,14 @@ body {
   color: #5e4a2c;
 }
 
+/* How many more waterings until the next decoration: one quiet line under your record. */
+.decor-next {
+  margin: 0.15rem 0 0.5rem;
+  font-size: 0.85rem;
+  font-style: italic;
+  color: #5e4a2c;
+}
+
 /* The seeds you can plant sit in the journal, and only while you are in your own garden. */
 .own-seeds {
   display: none;
@@ -908,7 +916,8 @@ body.own-mode .own-seeds {
 }
 
 /* The seeds you can plant, as in the shared garden's "What to plant". */
-#own-picker {
+#own-picker,
+#decor-picker {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
@@ -917,11 +926,13 @@ body.own-mode .own-seeds {
   overflow-y: auto;
 }
 
-#own-picker[hidden] {
+#own-picker[hidden],
+#decor-picker[hidden] {
   display: none;
 }
 
-#own-picker button {
+#own-picker button,
+#decor-picker button {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
@@ -938,11 +949,14 @@ body.own-mode .own-seeds {
 }
 
 #own-picker button:hover,
-#own-picker button:focus-visible {
+#own-picker button:focus-visible,
+#decor-picker button:hover,
+#decor-picker button:focus-visible {
   background: #fff6dc;
 }
 
-#own-picker button[aria-checked="true"] {
+#own-picker button[aria-checked="true"],
+#decor-picker button[aria-pressed="true"] {
   color: #fff;
   background: #4a6a35;
   border-color: #2f4721;
@@ -1102,6 +1116,12 @@ button.packet {
 body.photo-mode #bag,
 body.photo-mode .fly-seed {
   display: none !important;
+}
+
+/* In your own garden the way back is in the bar at the top, so the journal's own button
+   steps aside. On a phone the floating one stays, as the bar is a small strip there. */
+body.own-mode #own-button {
+  display: none;
 }
 
 /* In your own garden the shared garden's panels step aside; your journal stays. */

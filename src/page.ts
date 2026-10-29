@@ -148,11 +148,18 @@ export function renderPage(): string {
         <p id="own-seed" class="own-note"></p>
         <div id="own-picker" role="radiogroup" aria-label="Choose a seed to plant" hidden></div>
       </div>
+      <!-- In your own garden only: the decorations you have unlocked, to put out or take away. -->
+      <div id="own-decor" class="own-seeds" hidden>
+        <h3 class="paper-heading">Decorations</h3>
+        <div id="decor-picker" role="group" aria-label="Decorations for your garden"></div>
+      </div>
       <h3 class="paper-heading">My record</h3>
       <!-- A plain record, private to you: one line, no tiles, totals or goals. -->
       <p id="you-counts" class="you-counts">
         <span>Planted <b id="count-planted">0</b></span><span class="dot" aria-hidden="true"> · </span><span>Watered <b id="count-watered">0</b></span><span class="dot" aria-hidden="true"> · </span><span>Composted <b id="count-composted">0</b></span>
       </p>
+      <!-- How many more waterings of the shared garden until the next decoration, and nothing more. -->
+      <p id="decor-next" class="decor-next" hidden></p>
       <details id="album" class="journal-album">
         <summary class="album-tab"><svg class="album-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="4.5" width="18" height="15" rx="1.5"/><circle cx="8.5" cy="9.5" r="1.7"/><path d="M3.5 17l5-5 3.5 3.5 3-3 5.5 5"/></svg><span>Album</span></summary>
         <p id="album-note" class="panel-help">Photos you take are kept in this browser only. Nobody else sees them.</p>

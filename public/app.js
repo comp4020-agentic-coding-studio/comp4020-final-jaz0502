@@ -1673,6 +1673,10 @@ const OWN_HEDGE = OWN_HALF + 0.98;
 const ownObjects = new Map();
 // position -> your latest own Plot from the server
 const ownPlots = new Map();
+// The hedge round your bed, as its own group so a fence you have put out can stand in
+// its place.
+const ownHedge = new THREE.Group();
+scene.add(ownHedge);
 
 {
   const base = new THREE.Mesh(new THREE.BoxGeometry(OWN_HALF * 2 + 1.7, 0.3, OWN_HALF * 2 + 1.7), flatMaterial(bedBaseColour));
@@ -1684,6 +1688,8 @@ const ownPlots = new Map();
   const stoneGeometry = new THREE.CylinderGeometry(0.32, 0.36, 0.08, 7);
   for (let i = 0; i < 34; i++) {
     const t = (i / 34) * Math.PI * 2;
+    // No stones in front of the gap in the hedge, where the path comes in.
+    if (Math.sin(t) > 0 && Math.abs(Math.cos(t)) < 0.27) continue;
     const r = OWN_HEDGE + 0.85 + seeded(i * 3 + 70) * 0.15;
     const stone = new THREE.Mesh(stoneGeometry, stoneMaterial);
     stone.position.set(OWN_CENTRE.x + Math.cos(t) * r * 1.05, GROUND_Y + 0.04, OWN_CENTRE.z + Math.sin(t) * r * 1.05);
@@ -1701,7 +1707,7 @@ const ownPlots = new Map();
       const [x, z] = [[along, out], [out, along], [along, -out], [-out, along]][side];
       const ball = new THREE.Mesh(hedgeBallGeometry, hedgeMaterials[(k + side) % 3 < 0 ? 0 : (k + side) % 3]);
       ball.position.set(OWN_CENTRE.x + x, -0.08, OWN_CENTRE.z + z);
-      scene.add(ball);
+      ownHedge.add(ball);
     }
   }
 
@@ -1741,6 +1747,240 @@ function rebuildOwnPlant(position, type, state) {
   obj.group.add(obj.plantGroup);
   obj.baseSoilColor = new THREE.Color(soilColorFor(state));
   obj.soilMesh.material.color.copy(obj.baseSoilColor);
+}
+
+// Decorations you have put out in your own garden: a fence round the bed in place of
+// the hedge, and props on four fixed spots beyond the stones. They are only for show:
+// nothing in either garden depends on them, and only you ever see them.
+// None is on the side nearest the default camera, where it would be cut off at the bottom.
+const OWN_PROP_SPOTS = [[-3.3, 3], [-0.5, -4.2], [-3, -3], [3, -3], [-4.5, -0.2]];
+const OWN_SPOT_NAMES = ["fence", ...OWN_PROP_SPOTS.map((_, i) => `prop-${i}`)];
+const stoneWallMaterials = [0x9a958c, 0x8a867e, 0xa8a399].map((colour) => flatMaterial(colour));
+const ownDecorBuilt = new Map(); // spot -> { id, group }
+
+function buildOwnFence(kind) {
+  if (!["picket", "rustic", "stone"].includes(kind)) return null;
+  const group = new THREE.Group();
+  group.position.set(OWN_CENTRE.x, FENCE_BASE_Y, OWN_CENTRE.z);
+  const half = OWN_HEDGE;
+  const gap = 0.55;
+  [{ along: "x", across: half }, { along: "x", across: -half }, { along: "z", across: -half }, { along: "z", across: half }].forEach((side, index) => {
+    // The front, facing the shared garden, has a gap to step through.
+    const segments = index === 0 ? [[-half, -gap], [gap, half]] : [[-half, half]];
+    for (const [from, to] of segments) {
+      const length = to - from;
+      const put = (mesh, t, y, lift = 0) => {
+        mesh.position.set(side.along === "x" ? t : side.across + lift, y, side.along === "x" ? side.across + lift : t);
+        group.add(mesh);
+      };
+      const box = (l, h, d) => new THREE.BoxGeometry(...(side.along === "x" ? [l, h, d] : [d, h, l]));
+      if (kind === "picket") {
+        for (let t = from; t <= to + 0.001; t += 0.3) {
+          put(new THREE.Mesh(picketPostGeometry, picketMaterial), t, 0.17);
+          const cap = new THREE.Mesh(picketCapGeometry, picketMaterial);
+          cap.rotation.y = Math.PI / 4;
+          put(cap, t, 0.375);
+        }
+        for (const y of [0.1, 0.25]) put(new THREE.Mesh(box(length, 0.035, 0.03), picketMaterial), (from + to) / 2, y);
+      } else if (kind === "rustic") {
+        const count = Math.max(1, Math.round(length / LOG_STEP));
+        const step = length / count;
+        for (let i = 0; i <= count; i++) put(new THREE.Mesh(logPostGeometry, logMaterials[i % 3]), from + i * step, 0.18);
+        [[0.11, 0.045], [0.26, 0.04]].forEach(([y, thickness], row) => {
+          for (let i = 0; i < count; i++) put(new THREE.Mesh(box(step, thickness * 1.7, thickness * 1.7), logMaterials[(i + row) % 3]), from + (i + 0.5) * step, y, 0.04);
+        });
+      } else {
+        const count = Math.max(2, Math.round(length / 0.45));
+        const step = length / count;
+        for (let i = 0; i < count; i++) {
+          const height = 0.22 + (i % 3) * 0.035;
+          put(new THREE.Mesh(box(step * 0.96, height, 0.2), stoneWallMaterials[i % 3]), from + (i + 0.5) * step, height / 2);
+        }
+      }
+    }
+  });
+  return group;
+}
+
+let glowMap = null;
+function glowTexture() {
+  if (glowMap) return glowMap;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 128;
+  const ctx = canvas.getContext("2d");
+  const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gradient.addColorStop(0, "rgba(255,255,255,1)");
+  gradient.addColorStop(0.25, "rgba(255,255,255,0.45)");
+  gradient.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 128, 128);
+  glowMap = new THREE.CanvasTexture(canvas);
+  return glowMap;
+}
+
+// Each prop is drawn from a few plain shapes and stands facing the bed.
+function buildOwnProp(kind, spotIndex) {
+  const group = new THREE.Group();
+  const add = (geometry, colour, x, y, z, rotation) => {
+    const mesh = new THREE.Mesh(geometry, flatMaterial(colour));
+    mesh.position.set(x, y, z);
+    if (rotation) mesh.rotation.set(...rotation);
+    group.add(mesh);
+    return mesh;
+  };
+  if (kind === "bench") {
+    // A garden bench: a seat and a back of separate slats, back legs that rise to hold the
+    // back, arms, a brace between the legs and a cushion. About a metre and a half wide.
+    const woods = [0xb07a45, 0xa66f3c];
+    const dark = 0x6a4626;
+    for (let i = 0; i < 5; i++) add(new THREE.BoxGeometry(1.5, 0.045, 0.085), woods[i % 2], 0, 0.43, -0.19 + i * 0.095);
+    for (let i = 0; i < 3; i++) add(new THREE.BoxGeometry(1.5, 0.11, 0.04), woods[i % 2], 0, 0.64 + i * 0.14, -0.25 - i * 0.02, [-0.12, 0, 0]);
+    for (const x of [-0.68, 0.68]) {
+      add(new THREE.BoxGeometry(0.075, 0.43, 0.075), dark, x, 0.215, 0.2);
+      add(new THREE.BoxGeometry(0.075, 0.98, 0.075), dark, x, 0.49, -0.23, [-0.12, 0, 0]);
+      add(new THREE.BoxGeometry(0.07, 0.035, 0.5), woods[0], x * 1.06, 0.66, -0.02);
+      add(new THREE.BoxGeometry(0.05, 0.23, 0.05), dark, x * 1.06, 0.55, 0.19);
+    }
+    add(new THREE.BoxGeometry(1.38, 0.04, 0.04), dark, 0, 0.17, 0.2);
+    add(new THREE.BoxGeometry(1.38, 0.04, 0.04), dark, 0, 0.17, -0.2);
+    // A cushion on one side, a little crooked, so it looks sat on.
+    add(new THREE.BoxGeometry(0.44, 0.085, 0.34), 0xd9776b, 0.36, 0.5, 0.02, [0, 0.12, 0]);
+    add(new THREE.BoxGeometry(0.4, 0.2, 0.07), 0xe8998d, 0.36, 0.64, -0.2, [-0.22, 0.1, 0]);
+  } else if (kind === "lantern") {
+    // A Victorian lamp post: a stepped plinth, a fluted column that narrows as it rises, brass
+    // collars, a ladder bar and curled brackets, and a tapering glass lantern in an iron frame
+    // with a pointed cap and a finial. Dark green iron and brass; it glows after dark.
+    const iron = 0x1f3a32;
+    const brass = 0xb38b3d;
+    add(new THREE.CylinderGeometry(0.3, 0.34, 0.1, 8), 0x8d8a82, 0, 0.05, 0);
+    add(new THREE.CylinderGeometry(0.22, 0.28, 0.12, 8), iron, 0, 0.16, 0);
+    add(new THREE.CylinderGeometry(0.14, 0.2, 0.2, 8), iron, 0, 0.32, 0);
+    add(new THREE.TorusGeometry(0.115, 0.025, 6, 12), brass, 0, 0.44, 0, [Math.PI / 2, 0, 0]);
+    add(new THREE.CylinderGeometry(0.045, 0.085, 1.0, 8), iron, 0, 0.96, 0);
+    add(new THREE.TorusGeometry(0.085, 0.02, 6, 12), brass, 0, 0.7, 0, [Math.PI / 2, 0, 0]);
+    add(new THREE.TorusGeometry(0.062, 0.02, 6, 12), brass, 0, 1.18, 0, [Math.PI / 2, 0, 0]);
+    add(new THREE.CylinderGeometry(0.075, 0.05, 0.1, 8), iron, 0, 1.5, 0);
+    // The ladder bar, with a knob at each end, and a pair of scrolled brackets.
+    add(new THREE.BoxGeometry(0.46, 0.022, 0.022), iron, 0, 1.3, 0);
+    for (const side of [-1, 1]) {
+      add(new THREE.SphereGeometry(0.032, 6, 5), brass, side * 0.23, 1.3, 0);
+      add(new THREE.TorusGeometry(0.1, 0.014, 5, 10, Math.PI), iron, side * 0.1, 1.46, 0, [0, 0, Math.PI]);
+    }
+    // The lantern: a cup, glass that widens upward, four corner posts, and a roof.
+    add(new THREE.ConeGeometry(0.1, 0.14, 4), iron, 0, 1.6, 0, [Math.PI, Math.PI / 4, 0]);
+    const glass = add(new THREE.CylinderGeometry(0.17, 0.1, 0.36, 4), 0xffe3a0, 0, 1.85, 0, [0, Math.PI / 4, 0]);
+    glass.material.emissive = new THREE.Color(0xffb84a);
+    glass.material.emissiveIntensity = 0.9;
+    for (const [dx, dz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      add(new THREE.BoxGeometry(0.02, 0.38, 0.02), iron, dx * 0.1, 1.85, dz * 0.1);
+    }
+    add(new THREE.BoxGeometry(0.34, 0.025, 0.34), iron, 0, 2.04, 0);
+    add(new THREE.ConeGeometry(0.27, 0.18, 4), iron, 0, 2.145, 0, [0, Math.PI / 4, 0]);
+    add(new THREE.ConeGeometry(0.1, 0.1, 4), iron, 0, 2.28, 0, [0, Math.PI / 4, 0]);
+    add(new THREE.SphereGeometry(0.04, 7, 5), brass, 0, 2.35, 0);
+    add(new THREE.ConeGeometry(0.014, 0.12, 5), brass, 0, 2.44, 0);
+    // A soft glow: a sprite painted with a radial fade, so it has no edge.
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: 0xffc860, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+    halo.scale.setScalar(2.1);
+    halo.position.set(0, 1.85, 0);
+    group.add(halo);
+    // Only lit after dark: updateFireflies sets its glow from the night.
+    group.userData.halo = halo;
+  } else if (kind === "scarecrow") {
+    // A scarecrow on a pole: a patched shirt, straw at the cuffs and hem, a sack head with a
+    // stitched face, and a battered hat with a band.
+    const wood = 0x7a5230;
+    add(new THREE.CylinderGeometry(0.04, 0.05, 1.9, 6), wood, 0, 0.95, 0);
+    add(new THREE.BoxGeometry(1.35, 0.07, 0.07), wood, 0, 1.28, 0, [0, 0, 0.05]);
+    add(new THREE.BoxGeometry(0.5, 0.58, 0.28), 0x4a6aa8, 0, 1.13, 0);
+    add(new THREE.BoxGeometry(1.0, 0.2, 0.2), 0x4a6aa8, 0, 1.28, 0);
+    add(new THREE.BoxGeometry(0.16, 0.16, 0.02), 0xc9553f, 0.12, 1.1, 0.15);
+    add(new THREE.BoxGeometry(0.5, 0.07, 0.3), 0x364f82, 0, 0.84, 0);
+    const straw = [0xe3c35e, 0xd1ae44, 0xedd277];
+    for (const [x, y, rz] of [[-0.7, 1.26, 1.5], [0.7, 1.26, -1.5], [-0.66, 1.2, 1.9], [0.66, 1.2, -1.9], [-0.7, 1.3, 1.1], [0.7, 1.3, -1.1]]) {
+      add(new THREE.ConeGeometry(0.035, 0.2, 5), straw[Math.abs(Math.round(x * 10 + y * 10)) % 3], x, y, 0, [0, 0, rz]);
+    }
+    for (let i = 0; i < 7; i++) add(new THREE.ConeGeometry(0.03, 0.2, 5), straw[i % 3], -0.2 + i * 0.065, 0.74, 0.02 * (i % 3 - 1), [Math.PI, 0, (i - 3) * 0.12]);
+    add(new THREE.SphereGeometry(0.2, 10, 8), 0xdcc48a, 0, 1.6, 0);
+    for (const x of [-0.07, 0.07]) add(new THREE.SphereGeometry(0.025, 6, 5), 0x2b2118, x, 1.64, 0.18);
+    add(new THREE.BoxGeometry(0.14, 0.02, 0.02), 0x2b2118, 0, 1.54, 0.19);
+    for (const x of [-0.06, -0.02, 0.02, 0.06]) add(new THREE.BoxGeometry(0.012, 0.045, 0.012), 0x2b2118, x, 1.54, 0.19);
+    add(new THREE.CylinderGeometry(0.34, 0.36, 0.035, 12), 0x8a6a3a, 0, 1.76, 0, [0.08, 0, 0.05]);
+    add(new THREE.CylinderGeometry(0.17, 0.2, 0.2, 10), 0x8a6a3a, 0, 1.87, 0, [0.08, 0, 0.05]);
+    add(new THREE.CylinderGeometry(0.205, 0.205, 0.045, 10), 0x4f6b35, 0, 1.79, 0, [0.08, 0, 0.05]);
+  } else if (kind === "gnome") {
+    // A garden gnome about as tall as a bench: boots, a blue tunic with a belt and buckle,
+    // arms, a big white beard, a round nose and a tall red hat that flops over.
+    add(new THREE.BoxGeometry(0.14, 0.1, 0.22), 0x4a3320, -0.1, 0.05, 0.03);
+    add(new THREE.BoxGeometry(0.14, 0.1, 0.22), 0x4a3320, 0.1, 0.05, 0.03);
+    add(new THREE.CylinderGeometry(0.19, 0.27, 0.5, 10), 0x3b6ab8, 0, 0.34, 0);
+    add(new THREE.CylinderGeometry(0.27, 0.27, 0.06, 10), 0x2b2b30, 0, 0.3, 0);
+    add(new THREE.BoxGeometry(0.1, 0.08, 0.02), 0xe7c04a, 0, 0.3, 0.27);
+    for (const side of [-1, 1]) {
+      add(new THREE.CylinderGeometry(0.055, 0.065, 0.3, 7), 0x3b6ab8, side * 0.24, 0.42, 0.05, [0.2, 0, side * -0.4]);
+      add(new THREE.SphereGeometry(0.06, 7, 5), 0xf0c8a0, side * 0.32, 0.29, 0.11);
+    }
+    add(new THREE.SphereGeometry(0.17, 10, 8), 0xf0c8a0, 0, 0.71, 0);
+    add(new THREE.ConeGeometry(0.25, 0.42, 10), 0xfafafa, 0, 0.5, 0.1, [Math.PI + 0.25, 0, 0]);
+    add(new THREE.SphereGeometry(0.06, 8, 6), 0xe89a8a, 0, 0.71, 0.18);
+    for (const x of [-0.06, 0.06]) add(new THREE.SphereGeometry(0.02, 6, 5), 0x2b2118, x, 0.77, 0.15);
+    add(new THREE.ConeGeometry(0.2, 0.55, 10), 0xd0382c, 0, 1.1, 0, [0, 0, 0.05]);
+    add(new THREE.ConeGeometry(0.1, 0.22, 8), 0xd0382c, 0.07, 1.42, 0, [0, 0, -0.9]);
+    add(new THREE.CylinderGeometry(0.2, 0.2, 0.04, 10), 0xb02c22, 0, 0.84, 0);
+  } else if (kind === "birdbath") {
+    // A stone birdbath: a stepped base, a stem with a ring, a wide basin with a rim and
+    // water, and a little bird perched on the edge.
+    const stone = 0xb0aca2;
+    add(new THREE.CylinderGeometry(0.32, 0.36, 0.1, 12), 0x9a958c, 0, 0.05, 0);
+    add(new THREE.CylinderGeometry(0.22, 0.28, 0.1, 12), stone, 0, 0.15, 0);
+    add(new THREE.CylinderGeometry(0.1, 0.14, 0.55, 10), stone, 0, 0.45, 0);
+    add(new THREE.TorusGeometry(0.13, 0.04, 6, 12), stone, 0, 0.5, 0, [Math.PI / 2, 0, 0]);
+    add(new THREE.CylinderGeometry(0.5, 0.22, 0.16, 14), stone, 0, 0.82, 0);
+    add(new THREE.TorusGeometry(0.5, 0.045, 6, 18), 0xc4c0b6, 0, 0.9, 0, [Math.PI / 2, 0, 0]);
+    add(new THREE.CylinderGeometry(0.46, 0.46, 0.02, 16), 0x6fb7ff, 0, 0.88, 0).material.opacity = 0.9;
+    // The bird: a round body, a head, a beak, a tail and wings.
+    const bird = new THREE.Group();
+    const part = (geometry, colour, x, y, z, rotation) => {
+      const mesh = new THREE.Mesh(geometry, flatMaterial(colour));
+      mesh.position.set(x, y, z);
+      if (rotation) mesh.rotation.set(...rotation);
+      bird.add(mesh);
+    };
+    part(new THREE.SphereGeometry(0.075, 8, 6), 0xd9604a, 0, 0.04, 0);
+    part(new THREE.SphereGeometry(0.05, 8, 6), 0xc9503c, 0.06, 0.1, 0);
+    part(new THREE.ConeGeometry(0.018, 0.05, 5), 0xf0b030, 0.12, 0.1, 0, [0, 0, -Math.PI / 2]);
+    part(new THREE.ConeGeometry(0.03, 0.1, 5), 0xa63e2e, -0.1, 0.03, 0, [0, 0, Math.PI / 2 + 0.3]);
+    part(new THREE.BoxGeometry(0.1, 0.02, 0.05), 0xb04834, -0.01, 0.05, 0.06, [0.2, 0, 0.1]);
+    bird.position.set(0.36, 0.93, 0.18);
+    bird.rotation.y = 0.5;
+    group.add(bird);
+  } else {
+    return null;
+  }
+  const [x, z] = OWN_PROP_SPOTS[spotIndex];
+  group.position.set(OWN_CENTRE.x + x, GROUND_Y, OWN_CENTRE.z + z);
+  group.rotation.y = Math.atan2(-x, -z);
+  return group;
+}
+
+// Makes the scene match what you have put out. Anything gone from a spot is taken away.
+function syncOwnDecor() {
+  for (const spot of OWN_SPOT_NAMES) {
+    const id = ownDecor.placed[spot] ?? null;
+    const built = ownDecorBuilt.get(spot);
+    if ((built?.id ?? null) === id) continue;
+    if (built) {
+      scene.remove(built.group);
+      disposeGroup(built.group);
+      ownDecorBuilt.delete(spot);
+    }
+    if (!id) continue;
+    const group = spot === "fence" ? buildOwnFence(id) : buildOwnProp(id, Number(spot.slice(5)));
+    if (!group) continue;
+    scene.add(group);
+    ownDecorBuilt.set(spot, { id, group });
+  }
+  ownHedge.visible = !ownDecorBuilt.has("fence");
 }
 
 const waterAnimations = new Map();
@@ -2385,7 +2625,7 @@ function openOwnGarden() {
   refreshSeeds();
   const target = new THREE.Vector3(OWN_CENTRE.x, controls.target.y, OWN_CENTRE.z);
   // Look in from the front, the side facing the shared garden.
-  glideTo(target, target.clone().add(new THREE.Vector3(4.2, 5.2, 6.1)));
+  glideTo(target, target.clone().add(new THREE.Vector3(4.6, 2.7, 7.9)));
   statusBar.textContent = "Your own garden. Only you can see it. Click a plot to tend it.";
 }
 
@@ -2948,6 +3188,97 @@ bagList.addEventListener("click", (event) => {
   bagList.querySelector(`[data-type="${ownSelected}"]`)?.focus({ preventScroll: true });
 });
 
+// Decorations: what you have unlocked, how many waterings until the next, and what you
+// have put where. The journal says only how many more waterings, and lists what you
+// have: no total, no list of what is still locked, nothing marked new.
+const ownDecor = { unlocked: [], nextIn: null, placed: {} };
+let decorationList = [];
+const decorBox = document.getElementById("own-decor");
+const decorPicker = document.getElementById("decor-picker");
+const decorNext = document.getElementById("decor-next");
+
+function refreshDecorJournal() {
+  const n = ownDecor.nextIn;
+  decorNext.hidden = n === null;
+  decorNext.textContent = n === null ? "" : `${n} more watering${n === 1 ? "" : "s"} in the shared garden until your next decoration`;
+
+  const unlocked = ownDecor.unlocked.map((id) => decorationList.find((d) => d.id === id)).filter(Boolean);
+  // The fences come first, in a row of their own, then the props, each in the order they
+  // were unlocked. The hedge your bed starts with is not something you unlock: it is what
+  // shows when no fence is out. Once you have a fence it is offered too, at the front, so
+  // you can go back to it.
+  const fences = unlocked.filter((d) => d.kind === "fence");
+  const props = unlocked.filter((d) => d.kind !== "fence");
+  const have = [...(fences.length > 0 ? [{ id: "hedge", name: "Shrub hedge", kind: "fence" }] : []), ...fences, ...props];
+  decorBox.hidden = have.length === 0;
+  decorPicker.replaceChildren(
+    ...have.map((decoration) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.id = decoration.id;
+      button.textContent = decoration.name;
+      button.setAttribute(
+        "aria-pressed",
+        String(decoration.id === "hedge" ? !ownDecor.placed.fence : Object.values(ownDecor.placed).includes(decoration.id)),
+      );
+      return button;
+    }),
+  );
+}
+
+function renderDecorations(state) {
+  ownDecor.unlocked = state.unlocked;
+  ownDecor.nextIn = state.nextIn;
+  ownDecor.placed = state.placed;
+  syncOwnDecor();
+  refreshDecorJournal();
+}
+
+// Click a decoration to put it out (a fence takes the fence spot, a prop the first free
+// one), and click it again to take it away. The garden changes when the server says so.
+decorPicker.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-id]");
+  if (!button) return;
+  const id = button.dataset.id;
+  // The hedge takes the fence away. It does nothing if no fence is out.
+  const info = id === "hedge" ? { id, kind: "fence" } : decorationList.find((d) => d.id === id);
+  if (!info) return;
+  if (id === "hedge" && !ownDecor.placed.fence) return;
+  const spotNow = id === "hedge" ? "fence" : Object.entries(ownDecor.placed).find(([, placed]) => placed === id)?.[0];
+  let spot = spotNow;
+  let decoration = null;
+  if (!spotNow) {
+    decoration = id;
+    spot = info.kind === "fence" ? "fence" : OWN_SPOT_NAMES.slice(1).find((s) => !ownDecor.placed[s]);
+    if (!spot) {
+      showStatusMessage("Every spot is taken. Take one away to put this out.");
+      return;
+    }
+  }
+  if (Date.now() < actionsPausedUntil) {
+    showStatusMessage(SLOW_DOWN_MESSAGE);
+    return;
+  }
+  try {
+    const res = await fetch("/api/own-garden/decorate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ spot, decoration }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 429) {
+        const seconds = Number(res.headers.get("retry-after"));
+        actionsPausedUntil = Date.now() + (Number.isFinite(seconds) && seconds > 0 ? seconds : 5) * 1000;
+      }
+      showStatusMessage(body.error ?? "That didn't work just now.");
+    }
+  } catch {
+    showStatusMessage("Couldn't reach the server — try again.");
+  }
+  decorPicker.querySelector(`[data-id="${id}"]`)?.focus({ preventScroll: true });
+});
+
 ownPicker.addEventListener("click", (event) => {
   const option = event.target.closest("button[data-type]");
   if (!option) return;
@@ -3064,6 +3395,7 @@ function connect() {
     dayLengthMs = hello.dayLengthMs;
     clockOffset = hello.serverNow - Date.now();
     if (Array.isArray(hello.beds) && hello.beds.length === BEDS) beds = hello.beds;
+    if (Array.isArray(hello.decorations)) decorationList = hello.decorations;
     renderBedSigns();
     renderBedHere();
     renderYou();
@@ -3086,6 +3418,7 @@ function connect() {
   source.addEventListener("wave", (event) => waveFigure(JSON.parse(event.data).id));
   source.addEventListener("stats", (event) => renderStats(JSON.parse(event.data)));
   source.addEventListener("seeds", (event) => renderSeeds(JSON.parse(event.data)));
+  source.addEventListener("decorations", (event) => renderDecorations(JSON.parse(event.data)));
   source.addEventListener("own-garden", (event) => {
     for (const plot of JSON.parse(event.data)) applyOwnPlot(plot);
   });
@@ -4462,6 +4795,84 @@ function buildLane(points, width, seed) {
   scene.add(pebbles);
 }
 
+// A path from the gap in your own garden's hedge to the shared garden: a dirt strip with
+// flagstones set in it, like the ones round the beds. It is only for show: figures still
+// walk only on the beds' own paths, and nothing depends on where this one goes.
+{
+  const fromGap = [OWN_CENTRE.x, OWN_CENTRE.z + OWN_HEDGE - 0.3];
+  const toBed = [-4.7, 1.3];
+  const points = [fromGap, [OWN_CENTRE.x + 0.4, OWN_CENTRE.z + OWN_HEDGE + 1.9], [-12.4, 9.9], [-8.6, 7.6], [-6.0, 4.0], toBed];
+  buildLane(points, 1.5, 3.1);
+  const curve = new THREE.CatmullRomCurve3(points.map(([x, z]) => new THREE.Vector3(x, 0, z)), false, "catmullrom", 0.5);
+  const count = Math.ceil(curve.getLength() / 0.58);
+  for (let i = 0; i <= count; i++) {
+    const t = curve.getTangentAt(i / count);
+    const p = curve.getPointAt(i / count);
+    for (const side of [-1, 1]) {
+      const n = 7000 + i * 7 + (side + 1) * 3;
+      const off = side * (0.27 + (seeded(n + 1) - 0.5) * 0.14);
+      const stone = new THREE.Mesh(
+        flagstoneGeometries[Math.floor(seeded(n + 2) * flagstoneGeometries.length)],
+        stoneMaterials[Math.floor(seeded(n + 3) * stoneMaterials.length)],
+      );
+      const size = 0.5 + seeded(n + 4) * 0.1;
+      stone.scale.set(size, 1, size * (0.9 + seeded(n + 5) * 0.2));
+      stone.rotation.y = seeded(n + 6) * Math.PI * 2;
+      stone.position.set(p.x - t.z * off + (seeded(n + 7) - 0.5) * 0.1, GROUND_Y + 0.025 + seeded(n + 8) * 0.006, p.z + t.x * off + (seeded(n + 9) - 0.5) * 0.1);
+      scene.add(stone);
+    }
+  }
+}
+
+// Low garden lights along both sides of the path to your own garden: a short iron stake with
+// a small glass globe that glows after dark. Only a picture, like the path itself.
+const gardenLightGlows = [];
+{
+  const pathPoints = [
+    [OWN_CENTRE.x, OWN_CENTRE.z + OWN_HEDGE - 0.3],
+    [OWN_CENTRE.x + 0.4, OWN_CENTRE.z + OWN_HEDGE + 1.9],
+    [-12.4, 9.9],
+    [-8.6, 7.6],
+    [-6.0, 4.0],
+    [-4.7, 1.3],
+  ];
+  const curve = new THREE.CatmullRomCurve3(pathPoints.map(([x, z]) => new THREE.Vector3(x, 0, z)), false, "catmullrom", 0.5);
+  const iron = flatMaterial(0x1f3a32);
+  const stakeGeometry = new THREE.CylinderGeometry(0.014, 0.022, 0.3, 6);
+  const capGeometry = new THREE.ConeGeometry(0.075, 0.05, 6);
+  const globeGeometry = new THREE.SphereGeometry(0.065, 8, 6);
+  const count = Math.round(curve.getLength() / 1.7);
+  for (let i = 1; i < count; i++) {
+    const u = i / count;
+    const p = curve.getPointAt(u);
+    const t = curve.getTangentAt(u);
+    for (const side of [-1, 1]) {
+      // The first light on the garden's side would stand on a stone of the ring round it.
+      if (i === 1 && side === -1) continue;
+      const light = new THREE.Group();
+      // Just beyond the lane's edge, one on each side.
+      const off = side * 1.02;
+      light.position.set(p.x - t.z * off, GROUND_Y, p.z + t.x * off);
+      const stake = new THREE.Mesh(stakeGeometry, iron);
+      stake.position.y = 0.15;
+      light.add(stake);
+      const globeMaterial = new THREE.MeshStandardMaterial({ color: 0xfff0c4, emissive: 0xffc860, emissiveIntensity: 0.25, flatShading: true });
+      const globe = new THREE.Mesh(globeGeometry, globeMaterial);
+      globe.position.y = 0.34;
+      light.add(globe);
+      const cap = new THREE.Mesh(capGeometry, iron);
+      cap.position.y = 0.43;
+      light.add(cap);
+      const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: 0xffc860, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+      halo.scale.setScalar(0.9);
+      halo.position.y = 0.34;
+      light.add(halo);
+      scene.add(light);
+      gardenLightGlows.push({ halo, globeMaterial });
+    }
+  }
+}
+
 function updateCottage(timeSeconds) {
   // Lamplight in the windows and the lantern from dusk until dawn.
   cottageGlass.color.copy(glassNight).lerp(glassDay, dayness);
@@ -4541,6 +4952,13 @@ const stillMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 function updateFireflies(timeSeconds) {
   const night = stars.visible ? stars.material.opacity : 0;
+  for (const { halo, globeMaterial } of gardenLightGlows) {
+    halo.material.opacity = 0.75 * night;
+    globeMaterial.emissiveIntensity = 0.25 + 0.9 * night;
+  }
+  for (const { group } of ownDecorBuilt.values()) {
+    if (group.userData.halo) group.userData.halo.material.opacity = 0.9 * night;
+  }
   fireflies.visible = night > 0.02;
   if (!fireflies.visible) return;
   fireflyUniforms.night.value = night;
