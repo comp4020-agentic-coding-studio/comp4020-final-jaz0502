@@ -2591,7 +2591,8 @@ let ownSelected = null;
 const ownBar = document.getElementById("own-bar");
 const ownSeedLine = document.getElementById("own-seed");
 const ownPicker = document.getElementById("own-picker");
-const ownButtons = [document.getElementById("own-button"), document.getElementById("quick-own")];
+const ownSign = document.getElementById("own-sign");
+const ownButtons = [ownSign, document.getElementById("quick-own")];
 
 // The button that takes you to your garden takes you back to the shared one while you
 // are there, and says so.
@@ -2602,7 +2603,8 @@ const OWN_LABELS = {
 function renderOwnButtons() {
   for (const button of ownButtons) {
     button.setAttribute("aria-label", ownMode ? OWN_LABELS.back : OWN_LABELS.to);
-    const label = button.querySelector("span");
+    // The sign over your garden only shows while you are looking at the shared one.
+    const label = button === ownSign ? null : button.querySelector("span");
     if (label) label.textContent = ownMode ? "Shared garden" : "My garden";
   }
 }
@@ -3468,6 +3470,17 @@ function ndcFromEvent(event) {
   );
 }
 
+// The cow the pointer is over, with how far away it is, using the ray already set up.
+function cowUnderPointer() {
+  const hit = raycaster.intersectObjects(cows.map((c) => c.group), true)[0];
+  if (!hit) return null;
+  const cow = cows.find((c) => {
+    for (let o = hit.object; o; o = o.parent) if (o === c.group) return true;
+    return false;
+  });
+  return cow ? { cow, distance: hit.distance } : null;
+}
+
 // When the server last told this browser to slow down, until when to hold off.
 let actionsPausedUntil = 0;
 const SLOW_DOWN_MESSAGE = "Slow down: too many actions, try again in a few seconds";
@@ -3479,6 +3492,12 @@ async function handlePointerClick(event) {
   closeBag();
   raycaster.setFromCamera(ndcFromEvent(event), camera);
   const hit = raycaster.intersectObjects(soilMeshes, false)[0];
+  // A cow in front of whatever is behind it gets some hay, and nothing else happens.
+  const cow = cowUnderPointer();
+  if (cow && (!hit || cow.distance < hit.distance)) {
+    feedCow(cow.cow);
+    return;
+  }
   if (!hit) {
     // Not a plot: a click on the grass or the path sends your figure to the
     // nearest point on the path, or over to the other bed if it is nearer that.
@@ -3648,6 +3667,21 @@ function updateBedSigns() {
   });
 }
 
+// The sign over your own garden follows it on screen, as the bed signs do, and shows
+// whenever the garden is in view and you are not in it.
+const ownSignPoint = new THREE.Vector3();
+function updateOwnSign() {
+  const rect = renderer.domElement.getBoundingClientRect();
+  ownSignPoint.set(OWN_CENTRE.x, BED_SIGN_HEIGHT, OWN_CENTRE.z).project(camera);
+  const x = rect.left + ((ownSignPoint.x + 1) / 2) * rect.width;
+  const y = rect.top + ((1 - ownSignPoint.y) / 2) * rect.height;
+  const visible = !ownMode && !glide && ownSignPoint.z < 1 && x > rect.left && x < rect.right && y > rect.top && y < rect.bottom;
+  if (ownSign.hidden === visible) ownSign.hidden = !visible;
+  if (!visible) return;
+  ownSign.style.left = `${x}px`;
+  ownSign.style.top = `${y}px`;
+}
+
 function clearHoveredPlot() {
   if (hoveredPosition !== null) sceneObjects.get(hoveredPosition).soilMesh.scale.set(1, 1, 1);
   hoveredPosition = null;
@@ -3659,6 +3693,9 @@ renderer.domElement.addEventListener("pointermove", (event) => {
   raycaster.setFromCamera(ndcFromEvent(event), camera);
   const hit = raycaster.intersectObjects(soilMeshes, false)[0];
   let position = hit ? hit.object.userData.position : null;
+  // A cow can be given hay, so the pointer says so over one.
+  const overCow = cowUnderPointer();
+  renderer.domElement.style.cursor = overCow && (!hit || overCow.distance < hit.distance) ? "pointer" : "";
 
   // Over the other bed, or the grass and path round it: offer to go there.
   let otherBed = null;
@@ -4297,8 +4334,9 @@ function buildCow(index) {
 const cows = Array.from({ length: COW_COUNT }, (_, i) => {
   const cow = buildCow(i);
   const angle = ((i + 0.3 * seeded(i + 5)) / COW_COUNT) * Math.PI * 2 + 0.4;
-  // The last cow's patch is pushed out a little further, to keep clear of the cottage.
-  const radius = 21 + seeded(i * 3 + 1) * 5 + (i === 4 ? 2 : 0);
+  // The last cow's patch is pushed out a little further, to keep clear of the cottage, and
+  // the fourth's further still, to keep clear of the barn.
+  const radius = 21 + seeded(i * 3 + 1) * 5 + (i === 4 ? 2 : 0) + (i === 3 ? 7 : 0);
   cow.home = {
     x: GARDEN_CENTRE.x + Math.cos(angle) * radius,
     z: GARDEN_CENTRE.z + Math.sin(angle) * radius,
@@ -4350,6 +4388,189 @@ function updateCows(timeSeconds) {
     const chew = Math.sin(timeSeconds * 2.4 + i * 2) * 0.06 * lower;
     cow.head.rotation.z = 0.08 - 0.95 * lower + chew;
     cow.tail.rotation.x = Math.sin(timeSeconds * 1.8 + i * 1.3) * 0.3;
+    // A cow that has been given hay leaves its usual round for a little while.
+    if (cow.feed) updateFeeding(cow, i);
+  });
+}
+
+// Feeding a cow: click one and some hay lands in front of it, it walks over, eats with
+// a few hearts floating up, then wanders back to where its day had put it. This is a
+// way of looking and nothing more, like the camera: it is only in your own page, sends
+// nothing to the server, is never stored or counted, and no cow is ever in anyone's
+// way. Someone else's cow keeps to its usual round on their screen.
+const FEED_WALK_S = 2.4;
+const FEED_EAT_S = 6;
+const FEED_RETURN_S = 3;
+const lerpAngle = (a, b, k) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * k;
+
+// Hay: a round bale lying on its side, a mound of loose straw heaped against it and a
+// few stalks sticking out, in the same flat-shaded lumps as everything else, so it reads
+// as a pile of hay and not a bundle of sticks or a crate.
+const hayMaterial = flatMaterial(0xe0bb52);
+const hayDarkMaterial = flatMaterial(0xc29a3c);
+const hayLightMaterial = flatMaterial(0xf0d680);
+const twineMaterial = flatMaterial(0x8a6a38);
+const baleGeometry = new THREE.CylinderGeometry(0.34, 0.34, 0.55, 9, 1);
+const baleRingGeometry = new THREE.CylinderGeometry(0.352, 0.352, 0.03, 9, 1);
+const baleEndGeometry = new THREE.CylinderGeometry(0.2, 0.2, 0.01, 9, 1);
+const tuftGeometry = new THREE.IcosahedronGeometry(1, 1);
+const stalkGeometry = new THREE.CylinderGeometry(0.006, 0.014, 0.3, 4);
+function buildHay() {
+  const hay = new THREE.Group();
+  // The bale: a cylinder on its side with a darker coil on each end and two bands of twine.
+  const bale = new THREE.Group();
+  const body = new THREE.Mesh(baleGeometry, hayMaterial);
+  body.rotation.z = Math.PI / 2;
+  bale.add(body);
+  for (const dx of [-0.27, 0.27]) {
+    const end = new THREE.Mesh(baleEndGeometry, hayDarkMaterial);
+    end.rotation.z = Math.PI / 2;
+    end.position.x = dx + Math.sign(dx) * 0.0;
+    end.position.x = Math.sign(dx) * 0.2755;
+    bale.add(end);
+  }
+  for (const dx of [-0.14, 0.14]) {
+    const ring = new THREE.Mesh(baleRingGeometry, twineMaterial);
+    ring.rotation.z = Math.PI / 2;
+    ring.position.x = dx;
+    bale.add(ring);
+  }
+  bale.position.set(-0.08, 0.34, -0.12);
+  bale.rotation.y = 0.35;
+  hay.add(bale);
+  // A mound of loose straw in front: squashed lumps in three yellows, heaped up in the middle.
+  const mound = [
+    [0.0, 0.0, 0.5, 0.2, hayMaterial], [0.32, 0.12, 0.34, 0.16, hayLightMaterial], [-0.3, 0.2, 0.34, 0.15, hayDarkMaterial],
+    [0.12, 0.34, 0.3, 0.14, hayDarkMaterial], [-0.1, 0.1, 0.28, 0.2, hayLightMaterial], [0.4, -0.12, 0.22, 0.12, hayMaterial],
+    [-0.42, -0.02, 0.22, 0.11, hayLightMaterial], [0.05, 0.5, 0.2, 0.1, hayMaterial],
+  ];
+  mound.forEach(([x, z, r, h, material], k) => {
+    const lump = new THREE.Mesh(tuftGeometry, material);
+    lump.scale.set(r, h, r * 0.85);
+    lump.position.set(x, h * 0.45, z + 0.35);
+    lump.rotation.y = seeded(k + 70) * Math.PI;
+    hay.add(lump);
+  });
+  // Stalks poking out of the mound and the bale, at all angles.
+  for (let k = 0; k < 26; k++) {
+    const stalk = new THREE.Mesh(stalkGeometry, k % 3 === 0 ? hayLightMaterial : hayMaterial);
+    const a = seeded(k * 5 + 1) * Math.PI * 2;
+    const r = seeded(k * 5 + 2) * 0.55;
+    stalk.position.set(Math.cos(a) * r, 0.12 + seeded(k * 5 + 3) * 0.2, Math.sin(a) * r + 0.3);
+    stalk.rotation.set((seeded(k * 5 + 4) - 0.5) * 2.2, seeded(k * 5 + 5) * Math.PI, (seeded(k * 5 + 6) - 0.5) * 2.2);
+    hay.add(stalk);
+  }
+  return hay;
+}
+
+let heartTexture = null;
+function getHeartTexture() {
+  if (heartTexture) return heartTexture;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 64;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#e0566e";
+  ctx.beginPath();
+  ctx.moveTo(32, 56);
+  ctx.bezierCurveTo(4, 36, 8, 8, 32, 20);
+  ctx.bezierCurveTo(56, 8, 60, 36, 32, 56);
+  ctx.fill();
+  heartTexture = new THREE.CanvasTexture(canvas);
+  return heartTexture;
+}
+
+function feedCow(cow) {
+  if (cow.feed) return; // already eating: a second click does nothing
+  const from = { x: cow.group.position.x, z: cow.group.position.z, r: cow.group.rotation.y };
+  // The hay lands a couple of steps in front of the cow, on the side the camera looks from.
+  const toCamera = new THREE.Vector2(camera.position.x - from.x, camera.position.z - from.z).normalize();
+  const hay = { x: from.x + toCamera.x * 2.4, z: from.z + toCamera.y * 2.4 };
+  const stand = { x: hay.x - toCamera.x * 1.15, z: hay.z - toCamera.y * 1.15 };
+  const mesh = buildHay();
+  mesh.position.set(hay.x, GROUND_Y, hay.z);
+  scene.add(mesh);
+  const hearts = [0, 1, 2].map(() => {
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: getHeartTexture(), transparent: true, depthWrite: false }));
+    sprite.scale.set(0.45, 0.45, 1);
+    sprite.visible = false;
+    scene.add(sprite);
+    return sprite;
+  });
+  cow.feed = {
+    start: performance.now() / 1000,
+    from,
+    stand,
+    heading: Math.atan2(-(hay.z - from.z), hay.x - from.x),
+    mesh,
+    hearts,
+  };
+  showStatusMessage("You tossed the cow some hay");
+}
+
+function endFeeding(cow) {
+  scene.remove(cow.feed.mesh);
+  for (const heart of cow.feed.hearts) {
+    scene.remove(heart);
+    heart.material.dispose();
+  }
+  cow.feed = null;
+}
+
+function updateFeeding(cow, index) {
+  const f = cow.feed;
+  const now = performance.now() / 1000;
+  const t = now - f.start;
+  const eatEnd = FEED_WALK_S + FEED_EAT_S;
+  if (t >= eatEnd + FEED_RETURN_S) {
+    endFeeding(cow);
+    return;
+  }
+  // Where the cow's own round has it right now: it is what it walks back to.
+  const usual = { x: cow.group.position.x, z: cow.group.position.z, r: cow.group.rotation.y };
+  let x;
+  let z;
+  let rotation;
+  let walking = 0;
+  let lower = 0;
+  if (t < FEED_WALK_S) {
+    const k = smooth(t / FEED_WALK_S);
+    x = f.from.x + (f.stand.x - f.from.x) * k;
+    z = f.from.z + (f.stand.z - f.from.z) * k;
+    rotation = lerpAngle(f.from.r, f.heading, smooth(clamp01(t / 0.5)));
+    walking = 1;
+  } else if (t < eatEnd) {
+    x = f.stand.x;
+    z = f.stand.z;
+    rotation = f.heading;
+    lower = smooth(clamp01((t - FEED_WALK_S) / 0.5)) * (1 - smooth(clamp01((t - eatEnd + 0.5) / 0.5)));
+  } else {
+    const k = smooth((t - eatEnd) / FEED_RETURN_S);
+    x = f.stand.x + (usual.x - f.stand.x) * k;
+    z = f.stand.z + (usual.z - f.stand.z) * k;
+    rotation = lerpAngle(f.heading, usual.r, smooth(clamp01((t - eatEnd) / 0.8)));
+    walking = 1;
+  }
+  cow.group.position.x = x;
+  cow.group.position.z = z;
+  cow.group.rotation.y = rotation;
+  const stride = Math.sin(now * 5 + index) * 0.45 * walking;
+  cow.legs[0].rotation.z = stride;
+  cow.legs[3].rotation.z = stride;
+  cow.legs[1].rotation.z = -stride;
+  cow.legs[2].rotation.z = -stride;
+  cow.head.rotation.z = 0.08 - 0.95 * lower + Math.sin(now * 7) * 0.07 * lower;
+
+  // The hay is eaten away while the cow eats, and is gone by the time it leaves.
+  const eaten = clamp01((t - FEED_WALK_S) / FEED_EAT_S);
+  f.mesh.visible = t < eatEnd;
+  f.mesh.scale.setScalar(Math.max(0.05, 1 - eaten * 0.9) * smooth(clamp01(t / 0.3)));
+  // A heart floats up from the cow now and then while it eats.
+  f.hearts.forEach((heart, n) => {
+    const h = (t - FEED_WALK_S - 0.5 - n * 1.9) / 1.6;
+    heart.visible = h > 0 && h < 1;
+    if (!heart.visible) return;
+    heart.position.set(x + Math.cos(rotation) * 0.5, GROUND_Y + 1.5 + h * 0.9, z - Math.sin(rotation) * 0.5);
+    heart.material.opacity = 1 - h * h;
   });
 }
 
@@ -4682,6 +4903,140 @@ function updateHens(timeSeconds) {
     hen.head.rotation.z = -1.1 * peck;
     hen.tail.rotation.z = 0.5 + Math.sin(timeSeconds * 2 + i) * 0.05;
   });
+}
+
+// A barn for the cows, out on the lawn between two of their patches, facing the garden:
+// a red barn with a gambrel roof, white-trimmed double doors, a hay loft with straw
+// poking out, a stack of bales and a water trough. All for show, like the cows: nobody
+// can go in, nothing depends on it, and the cows' patches keep clear of it.
+const BARN_AT = { x: 3.4, z: -27.5 };
+const BARN_SCALE = 1.3;
+const barnMat = {
+  wall: flatMaterial(0xb23a2c),
+  door: flatMaterial(0x8e2a20),
+  trim: flatMaterial(0xf2ead8),
+  roof: flatMaterial(0x5a4a42),
+  stone: flatMaterial(0x8a857c),
+  dark: flatMaterial(0x241c18),
+  bale: flatMaterial(0xe0bb52),
+  baleDark: flatMaterial(0xc29a3c),
+  twine: flatMaterial(0x8a6a38),
+  water: flatMaterial(0x7fb2cc),
+};
+// The windows and the hay loft door: dark glass by day, lamplight from dusk until dawn,
+// like the cottage's. updateBarn sets the colour; the halos are set with the fireflies.
+const barnGlass = new THREE.MeshBasicMaterial({ color: 0x241c18 });
+const barnGlassDay = new THREE.Color(0x241c18);
+const barnGlassNight = new THREE.Color(0xffc45e);
+const barnGlows = [];
+const barnLantern = new THREE.MeshBasicMaterial({ color: 0xfff0c4 });
+const barnGroup = new THREE.Group();
+{
+  const g = barnGroup;
+  const W = 4; // width across the front
+  const D = 3.2; // depth
+  const H = 2.4; // wall height
+  g.add(box(W + 0.14, 0.18, D + 0.14, barnMat.stone, 0, 0.09, 0)); // stone footing
+  g.add(box(W, H, D, barnMat.wall, 0, 0.18 + H / 2, 0));
+  // Gambrel gable at each end: a steep lower slope and a shallow upper one.
+  const profile = [[-W / 2, 0], [W / 2, 0], [1.2, 1.0], [0, 1.6], [-1.2, 1.0]];
+  const gableShape = new THREE.Shape(profile.map(([x, y]) => new THREE.Vector2(x, y)));
+  const gable = new THREE.Mesh(new THREE.ExtrudeGeometry(gableShape, { depth: D, bevelEnabled: false }), barnMat.wall);
+  gable.position.set(0, 0.18 + H, -D / 2);
+  g.add(gable);
+  // The roof: four slabs along the profile, pushed a little out so the walls sit under it.
+  const slab = (a, b, side) => {
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const len = Math.hypot(dx, dy);
+    const nx = dy / len;
+    const ny = -dx / len;
+    const mesh = box(len + 0.12, 0.1, D + 0.4, barnMat.roof, side * ((a[0] + b[0]) / 2 + nx * 0.07), 0.18 + H + (a[1] + b[1]) / 2 + ny * 0.07, 0);
+    mesh.rotation.z = Math.atan2(dy, dx * side);
+    g.add(mesh);
+  };
+  for (const side of [1, -1]) {
+    slab([W / 2, 0], [1.2, 1.0], side);
+    slab([1.2, 1.0], [0, 1.6], side);
+  }
+  g.add(box(0.2, 0.08, D + 0.44, barnMat.trim, 0, 0.18 + H + 1.68, 0)); // ridge cap
+  // Double doors in front, each with a white frame and an X.
+  const front = D / 2 + 0.03;
+  g.add(box(1.7, 1.75, 0.04, barnMat.dark, 0, 0.18 + 0.875, front - 0.01));
+  const trimBar = (w, h, x, y, z, angle = 0) => {
+    const bar = box(w, h, 0.05, barnMat.trim, x, y, z);
+    bar.rotation.z = angle;
+    g.add(bar);
+  };
+  for (const side of [-1, 1]) {
+    const cx = side * 0.43;
+    const cy = 0.18 + 0.875;
+    g.add(box(0.8, 1.65, 0.05, barnMat.door, cx, cy, front + 0.01));
+    trimBar(0.8, 0.07, cx, cy + 0.79, front + 0.04);
+    trimBar(0.8, 0.07, cx, cy - 0.79, front + 0.04);
+    trimBar(0.07, 1.65, cx - 0.37, cy, front + 0.04);
+    trimBar(0.07, 1.65, cx + 0.37, cy, front + 0.04);
+    trimBar(1.7, 0.06, cx, cy, front + 0.045, Math.atan2(1.65, 0.8) * (side > 0 ? 1 : -1));
+  }
+  trimBar(0.07, 1.75, 0, 0.18 + 0.875, front + 0.05);
+  // The hay loft: a little door high in the front gable with straw spilling out.
+  const loftY = 0.18 + H + 0.62;
+  g.add(box(0.75, 0.7, 0.04, barnGlass, 0, loftY, front - 0.01));
+  trimBar(0.85, 0.07, 0, loftY + 0.38, front + 0.03);
+  trimBar(0.85, 0.07, 0, loftY - 0.38, front + 0.03);
+  trimBar(0.07, 0.76, -0.4, loftY, front + 0.03);
+  trimBar(0.07, 0.76, 0.4, loftY, front + 0.03);
+  const strawLump = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 1), barnMat.bale);
+  strawLump.scale.set(0.32, 0.18, 0.2);
+  strawLump.position.set(0.05, loftY - 0.26, front + 0.1);
+  g.add(strawLump);
+  // A window on each side wall, white-framed.
+  for (const side of [-1, 1]) {
+    const x = side * (W / 2 + 0.02);
+    const frame = box(0.05, 0.62, 0.62, barnMat.trim, x, 0.18 + 1.45, 0);
+    g.add(frame);
+    g.add(box(0.06, 0.46, 0.46, barnGlass, x + side * 0.005, 0.18 + 1.45, 0));
+  }
+  // A soft glow over each lit opening, drawn in front of it, only at night.
+  const barnHalo = (x, y, z, size) => {
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: 0xffc860, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+    halo.scale.setScalar(size);
+    halo.position.set(x, y, z);
+    g.add(halo);
+    barnGlows.push(halo);
+  };
+  barnHalo(0, loftY, front + 0.25, 2.1);
+  for (const side of [-1, 1]) barnHalo(side * (W / 2 + 0.06), 0.18 + 1.45, 0, 0.85);
+  // A lantern hanging by the doors, lit at night, so the way in is lit as well.
+  const lamp = new THREE.Group();
+  lamp.position.set(1.15, 0.18 + 1.75, front + 0.1);
+  lamp.add(box(0.05, 0.4, 0.05, barnMat.dark, 0, 0.1, -0.05));
+  lamp.add(box(0.3, 0.04, 0.04, barnMat.dark, -0.12, 0.3, -0.05));
+  lamp.add(box(0.18, 0.24, 0.18, barnLantern, 0, -0.04, 0.05));
+  lamp.add(box(0.22, 0.04, 0.22, barnMat.dark, 0, 0.1, 0.05));
+  g.add(lamp);
+  barnHalo(1.15, 0.18 + 1.7, front + 0.4, 1.5);
+  // A stack of bales against the right-hand wall, and a trough on the left.
+  const bale = (x, y, z, turn) => {
+    const b = new THREE.Group();
+    b.add(box(0.7, 0.4, 0.46, barnMat.bale, 0, 0, 0));
+    for (const dx of [-0.2, 0.2]) b.add(box(0.04, 0.42, 0.48, barnMat.twine, dx, 0, 0));
+    b.add(box(0.66, 0.02, 0.4, barnMat.baleDark, 0, 0.205, 0));
+    b.position.set(x, y, z);
+    b.rotation.y = turn;
+    g.add(b);
+  };
+  // The bales are on the side away from the cottage, and the trough on the cottage side.
+  bale(-W / 2 - 0.6, 0.38, 0.5, 0.1);
+  bale(-W / 2 - 0.6, 0.38, -0.2, -0.05);
+  bale(-W / 2 - 0.64, 0.8, 0.2, 0.2);
+  bale(-W / 2 - 0.6, 0.38, 1.2, -0.15);
+  g.add(box(1.2, 0.34, 0.45, barnMat.roof, W / 2 + 0.8, 0.17, 1.0)); // trough
+  g.add(box(1.04, 0.04, 0.3, barnMat.water, W / 2 + 0.8, 0.33, 1.0));
+  g.position.set(BARN_AT.x, GROUND_Y, BARN_AT.z);
+  g.rotation.y = Math.atan2(GARDEN_CENTRE.x - BARN_AT.x, GARDEN_CENTRE.z - BARN_AT.z);
+  g.scale.setScalar(BARN_SCALE);
+  scene.add(g);
 }
 
 // A cottage behind the garden, facing it: cream walls, a honey-coloured thatch with
@@ -5065,6 +5420,13 @@ const gardenLightGlows = [];
   }
 }
 
+// The barn's windows and loft door glow from dusk until dawn, on the same light as the
+// cottage's, and the halos swell with the night.
+function updateBarn(night) {
+  barnGlass.color.copy(barnGlassDay).lerp(barnGlassNight, 1 - dayness);
+  for (const halo of barnGlows) halo.material.opacity = 0.8 * night;
+}
+
 function updateCottage(timeSeconds) {
   // Lamplight in the windows and the lantern from dusk until dawn.
   cottageGlass.color.copy(glassNight).lerp(glassDay, dayness);
@@ -5148,6 +5510,7 @@ function updateFireflies(timeSeconds) {
     halo.material.opacity = 0.75 * night;
     globeMaterial.emissiveIntensity = 0.25 + 0.9 * night;
   }
+  updateBarn(night);
   for (const { group } of ownDecorBuilt.values()) {
     if (group.userData.halo) group.userData.halo.material.opacity = 0.9 * night;
   }
@@ -5168,6 +5531,7 @@ function animate() {
   updateGlide(now);
   controls.update();
   updateBedSigns();
+  updateOwnSign();
   tickAnimations(now);
   updateRings(now);
   updateSky();

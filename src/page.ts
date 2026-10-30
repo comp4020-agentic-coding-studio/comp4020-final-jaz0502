@@ -140,7 +140,6 @@ export function renderPage(): string {
         <button type="button" id="camera-button" class="journal-action" aria-label="Take a photo of the garden"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 8h3l1.6-2.2h6.8L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.2" r="3.6"/></svg><span>Camera</span></button>
         <button type="button" id="wave-button" class="journal-action" aria-label="Wave hello to everyone in the garden"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 13V6.5a1.5 1.5 0 0 1 3 0V12"/><path d="M11 11V5a1.5 1.5 0 0 1 3 0v6"/><path d="M14 11V6.5a1.5 1.5 0 0 1 3 0V14c0 4-2.6 6.5-6.2 6.5-2.6 0-4.2-1.4-5.4-3.4L3.8 14.3a1.4 1.4 0 0 1 2.3-1.5L8 15"/><path d="M19.5 4.5c.9.7 1.5 1.7 1.6 2.8"/></svg><span>Wave</span></button>
         <button type="button" id="bag-button" class="journal-action" aria-expanded="false" aria-controls="bag" aria-label="Open your bag of seeds"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/><path d="M6.2 8h11.6l1.4 12H4.8z"/><path d="M9.5 12.5c.6.9 1.4 1.3 2.5 1.3s1.9-.4 2.5-1.3"/></svg><span>Bag</span></button>
-        <button type="button" id="own-button" class="journal-action own-action" aria-label="Visit your own garden, which only you can see"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 21v-8"/><path d="M12 13c0-3.5 2.5-6 6.5-6 0 3.8-2.6 6-6.5 6z"/><path d="M12 15c0-3-2.2-5.2-5.6-5.2 0 3.3 2.3 5.2 5.6 5.2z"/><path d="M5 21h14"/></svg><span>My garden</span></button>
       </div>
       <!-- In your own garden only: the seeds you can plant, as "What to plant" is in the shared garden. -->
       <div id="own-seeds" class="own-seeds">
@@ -171,6 +170,11 @@ export function renderPage(): string {
 
   <button type="button" id="bed-sign" class="bed-sign" hidden>
     <span class="bed-sign-label"></span>
+  </button>
+
+  <!-- The same kind of sign, floating over your own garden: it is the way in. -->
+  <button type="button" id="own-sign" class="bed-sign own-sign" aria-label="Visit your own garden, which only you can see" hidden>
+    <span class="bed-sign-label">My garden</span>
   </button>
 
   <div id="photo-ui" hidden>

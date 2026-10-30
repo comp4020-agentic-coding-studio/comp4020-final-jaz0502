@@ -821,23 +821,12 @@ body {
   text-align: center;
 }
 
-/* "My garden" takes the whole row under Camera and Wave, in a warmer brown so it
-   reads as a place to go rather than something to do. */
+/* The journal's buttons share the row; the way into your own garden is a sign floating
+   over it, like the ones over the other beds. */
 .you-actions .journal-action {
   gap: 0.3rem;
   padding-left: 0.3rem;
   padding-right: 0.3rem;
-}
-
-.you-actions .own-action {
-  grid-column: 1 / -1;
-  background: #8a5a2b;
-  box-shadow: 0 2px 0 #5e3c1a;
-}
-
-.you-actions .own-action:hover,
-.you-actions .own-action:focus-visible {
-  background: #774b22;
 }
 
 /* Your own garden's bar: a slip of the same paper, top centre, with your seeds. */
@@ -1118,12 +1107,6 @@ body.photo-mode .fly-seed {
   display: none !important;
 }
 
-/* In your own garden the way back is in the bar at the top, so the journal's own button
-   steps aside. On a phone the floating one stays, as the bar is a small strip there. */
-body.own-mode #own-button {
-  display: none;
-}
-
 /* In your own garden the shared garden's panels step aside; your journal stays. */
 body.own-mode #panel,
 body.own-mode #feed-panel,
@@ -1288,6 +1271,18 @@ body.photo-mode #own-bar {
   box-shadow: 0 5px 18px rgba(0, 0, 0, 0.3);
   transform: translate(-50%, calc(-100% - 18px)) scale(1.06);
   animation: none;
+}
+
+.own-sign {
+  background: rgba(255, 244, 224, 0.9);
+  border-color: #8a5a2b;
+}
+
+.own-sign.is-hovered,
+.own-sign:hover,
+.own-sign:focus-visible {
+  background: #8a5a2b;
+  border-color: #8a5a2b;
 }
 
 @keyframes bed-sign-bob {
