@@ -4492,6 +4492,198 @@ function updateHills() {
   }
 }
 
+// A chicken coop with a few hens, on the lawn beside the cottage. The hens wander the
+// yard in front of it and peck, and like the cows their places are a pure function of
+// the server's clock, so every visitor sees them in the same spots. All for show: a hen
+// is never in anyone's way, never fed or counted, and nothing depends on where one is.
+const COOP_AT = { x: 6, z: -8.6 };
+const COOP_SCALE = 0.85; // small enough to sit on the lawn in the middle of the four beds
+const HEN_COUNT = 4;
+const HEN_SEGMENT_S = 7; // how long one walk-then-peck cycle lasts
+const HEN_YARD = 1.1; // how far from the coop's door a hen may wander
+const coopMat = {
+  wall: flatMaterial(0xc4452f),
+  trim: flatMaterial(0xf2ead8),
+  roof: flatMaterial(0x6b4a34),
+  wood: flatMaterial(0x8a6a48),
+  straw: flatMaterial(0xe2c46a),
+  dark: flatMaterial(0x2a2420),
+  wire: flatMaterial(0xcfc7b4),
+};
+const henColours = [0xf0e6d2, 0xb8683a, 0x3a3430, 0xd9a24a];
+const box = (w, h, d, material, x, y, z) => {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+  mesh.position.set(x, y, z);
+  return mesh;
+};
+
+// The coop faces +z: a little red house on stilts with a ramp down to the yard, a
+// pitched roof, a nesting box on the side and a fenced run in front.
+const coopGroup = new THREE.Group();
+{
+  const g = coopGroup;
+  for (const [sx, sz] of [[-0.8, -0.6], [0.8, -0.6], [-0.8, 0.6], [0.8, 0.6]]) g.add(box(0.14, 0.5, 0.14, coopMat.wood, sx, 0.25, sz));
+  g.add(box(1.9, 0.12, 1.5, coopMat.wood, 0, 0.56, 0)); // floor
+  g.add(box(1.8, 1.0, 1.4, coopMat.wall, 0, 1.12, 0)); // walls
+  g.add(box(1.86, 0.08, 0.14, coopMat.trim, 0, 0.62, 0.71)); // trim along the floor, proud of both the wall and the floor
+  g.add(box(0.5, 0.62, 0.06, coopMat.dark, 0.35, 1.0, 0.72)); // pop hole
+  g.add(box(0.58, 0.07, 0.1, coopMat.trim, 0.35, 1.33, 0.73));
+  g.add(box(0.5, 0.08, 0.06, coopMat.trim, -0.45, 1.12, 0.73)); // little window
+  g.add(box(0.36, 0.3, 0.05, coopMat.dark, -0.45, 1.12, 0.715));
+  // A gable of wall colour under the roof at each end, so no gap shows beneath it.
+  const gableShape = new THREE.Shape([new THREE.Vector2(-0.88, 0), new THREE.Vector2(0.88, 0), new THREE.Vector2(0, 0.55)]);
+  const gableGeometry = new THREE.ExtrudeGeometry(gableShape, { depth: 1.36, bevelEnabled: false });
+  const gable = new THREE.Mesh(gableGeometry, coopMat.wall);
+  gable.position.set(0, 1.6, -0.68);
+  g.add(gable);
+  // Pitched roof: two slabs meeting at a ridge, high enough that the walls stay under them.
+  for (const side of [1, -1]) {
+    const slab = box(1.3, 0.09, 1.8, coopMat.roof, side * 0.57, 1.95, 0);
+    slab.rotation.z = -side * 0.5;
+    g.add(slab);
+  }
+  g.add(box(0.16, 0.08, 1.84, coopMat.trim, 0, 2.28, 0));
+  // Nesting box on the left side, with straw showing.
+  g.add(box(0.5, 0.5, 0.7, coopMat.wall, -1.12, 0.95, 0));
+  const lid = box(0.62, 0.06, 0.82, coopMat.roof, -1.12, 1.27, 0);
+  lid.rotation.z = 0.2;
+  g.add(lid);
+  g.add(box(0.4, 0.14, 0.04, coopMat.straw, -1.12, 0.8, 0.37)); // straw showing at the front of the box
+
+  // Ramp from the pop hole down to the grass, with cleats.
+  const ramp = box(0.5, 0.05, 1.2, coopMat.wood, 0.35, 0.34, 1.25);
+  ramp.rotation.x = 0.4;
+  g.add(ramp);
+  // Cleats lie on the ramp: each one is moved along the slope and tilted with it.
+  for (let k = 0; k < 4; k++) {
+    const along = (k + 0.5) / 4 - 0.5; // -0.5 at the top of the ramp, 0.5 at the foot
+    const cleat = box(0.5, 0.03, 0.05, coopMat.trim, 0.35, 0.34 - along * 1.2 * Math.sin(0.4) + 0.045, 1.25 + along * 1.2 * Math.cos(0.4));
+    cleat.rotation.x = 0.4;
+    g.add(cleat);
+  }
+  // A fenced run in front: posts and two rails round three sides.
+  const run = [[-1.2, 0.9], [-1.2, 3.6], [1.9, 3.6], [1.9, 0.9]];
+  const rails = (a, b) => {
+    const dx = b[0] - a[0];
+    const dz = b[1] - a[1];
+    const len = Math.hypot(dx, dz);
+    for (const y of [0.22, 0.45]) {
+      const rail = box(len, 0.04, 0.04, coopMat.wire, (a[0] + b[0]) / 2, y, (a[1] + b[1]) / 2);
+      rail.rotation.y = -Math.atan2(dz, dx);
+      g.add(rail);
+    }
+  };
+  for (let k = 0; k < run.length; k++) {
+    g.add(box(0.07, 0.55, 0.07, coopMat.wood, run[k][0], 0.27, run[k][1]));
+    if (k < run.length - 1) rails(run[k], run[k + 1]);
+  }
+  // Mid-posts along the long sides so the rails don't float over empty space.
+  for (const x of [-1.2, 1.9]) g.add(box(0.07, 0.55, 0.07, coopMat.wood, x, 0.27, 2.25));
+  g.add(box(0.07, 0.55, 0.07, coopMat.wood, 0.35, 0.27, 3.6));
+  // A feeder and a drinker in the run.
+  g.add(box(0.3, 0.16, 0.3, coopMat.roof, -0.6, 0.08, 3.0));
+  const drinker = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 0.2, 8), coopMat.wire);
+  drinker.position.set(1.3, 0.1, 2.9);
+  g.add(drinker);
+  g.position.set(COOP_AT.x, GROUND_Y, COOP_AT.z);
+  g.rotation.y = 0; // the front faces the view you start with
+  g.scale.setScalar(COOP_SCALE);
+  scene.add(g);
+}
+
+// One hen faces +x. The head hangs from a pivot so it can bob and peck, and the tail
+// is a small fan. A hen is a handful of the same rounded lumps the cows are made of.
+function buildHen(index) {
+  const coat = flatMaterial(henColours[index % henColours.length]);
+  const beak = flatMaterial(0xe0a030);
+  const comb = flatMaterial(0xc8322a);
+  const group = new THREE.Group();
+  const body = new THREE.Group();
+  group.add(body);
+  body.position.y = 0.2;
+  body.add(cowBlob(0.2, 0.14, 0.13, coat, 0, 0, 0));
+  body.add(cowBlob(0.1, 0.1, 0.1, coat, 0.11, 0.03, 0)); // breast
+  const tail = new THREE.Group();
+  tail.position.set(-0.17, 0.05, 0);
+  tail.add(cowBlob(0.1, 0.08, 0.04, coat, -0.05, 0.06, 0));
+  tail.rotation.z = 0.5;
+  body.add(tail);
+  for (const side of [1, -1]) body.add(cowBlob(0.12, 0.07, 0.025, coat, -0.02, 0.0, side * 0.12)); // wings
+  const head = new THREE.Group();
+  head.position.set(0.18, 0.12, 0);
+  head.add(cowBlob(0.045, 0.1, 0.045, coat, 0.0, 0.05, 0)); // neck
+  head.add(cowBlob(0.065, 0.06, 0.055, coat, 0.03, 0.12, 0));
+  head.add(cowBlob(0.035, 0.015, 0.02, beak, 0.1, 0.115, 0));
+  head.add(cowBlob(0.02, 0.03, 0.012, comb, 0.03, 0.18, 0));
+  head.add(cowBlob(0.012, 0.012, 0.012, cowMaterials.black, 0.07, 0.14, 0.04));
+  head.add(cowBlob(0.012, 0.012, 0.012, cowMaterials.black, 0.07, 0.14, -0.04));
+  body.add(head);
+  const legs = [];
+  for (const side of [0.05, -0.05]) {
+    const leg = new THREE.Group();
+    leg.position.set(0.0, -0.1, side);
+    leg.add(cowBlob(0.012, 0.09, 0.012, beak, 0, -0.07, 0));
+    leg.add(cowBlob(0.04, 0.012, 0.03, beak, 0.02, -0.15, 0));
+    body.add(leg);
+    legs.push(leg);
+  }
+  return { group, body, head, tail, legs };
+}
+
+const hens = Array.from({ length: HEN_COUNT }, (_, i) => {
+  const hen = buildHen(i);
+  hen.group.position.y = GROUND_Y;
+  hen.group.scale.setScalar(0.95);
+  scene.add(hen.group);
+  return hen;
+});
+
+// Where a hen is in the yard for one cycle: in front of the coop, in its own turn.
+function henSpot(index, cycle) {
+  const a = seeded(index * 131 + cycle * 5.7) * Math.PI * 2;
+  const r = 0.4 + seeded(index * 71 + cycle * 2.3) * HEN_YARD;
+  // The yard is a patch just outside the run, in front of the coop's door.
+  const along = Math.cos(a) * r;
+  const out = 3.6 * COOP_SCALE + 1.3 + Math.sin(a) * r * 0.7; // always past the run's fence
+  const turn = coopGroup.rotation.y;
+  const x = COOP_AT.x + Math.sin(turn) * out + Math.cos(turn) * (along + 0.4);
+  const z = COOP_AT.z + Math.cos(turn) * out - Math.sin(turn) * (along + 0.4);
+  return { x, z };
+}
+
+function updateHens(timeSeconds) {
+  hens.forEach((hen, i) => {
+    const t = timeSeconds / HEN_SEGMENT_S + i * 0.29;
+    const cycle = Math.floor(t);
+    const p = t - cycle;
+    const from = henSpot(i, cycle);
+    const to = henSpot(i, cycle + 1);
+    const before = henSpot(i, cycle - 1);
+    const headingTo = Math.atan2(-(to.z - from.z), to.x - from.x);
+    const headingFrom = Math.atan2(-(from.z - before.z), from.x - before.x);
+    const turn = smooth(clamp01(p / 0.1));
+    let delta = headingTo - headingFrom;
+    delta = Math.atan2(Math.sin(delta), Math.cos(delta));
+    const walk = smooth(clamp01((p - 0.1) / 0.25));
+    hen.group.rotation.y = headingFrom + delta * turn;
+    hen.group.position.x = from.x + (to.x - from.x) * walk;
+    hen.group.position.z = from.z + (to.z - from.z) * walk;
+
+    const walking = p > 0.1 && p < 0.35 ? 1 : 0;
+    const step = Math.sin(timeSeconds * 14 + i * 2) * 0.6 * walking;
+    hen.legs[0].rotation.z = step;
+    hen.legs[1].rotation.z = -step;
+    hen.body.position.y = 0.2 + Math.abs(step) * 0.02;
+    // Walking, the head bobs forward and back; standing, it pecks at the ground in
+    // quick bursts, and now and then lifts to look about.
+    const peckTime = timeSeconds * 6 + i * 1.7;
+    const peck = walking ? 0 : Math.max(0, Math.sin(peckTime)) ** 3 * (Math.sin(timeSeconds * 0.6 + i * 3) > -0.2 ? 1 : 0);
+    hen.head.position.x = 0.18 + (walking ? Math.sin(timeSeconds * 14 + i * 2) * 0.02 : 0);
+    hen.head.rotation.z = -1.1 * peck;
+    hen.tail.rotation.z = 0.5 + Math.sin(timeSeconds * 2 + i) * 0.05;
+  });
+}
+
 // A cottage behind the garden, facing it: cream walls, a honey-coloured thatch with
 // scalloped eaves, a round-topped door, shutters with hearts, a crooked chimney with
 // smoke, toadstools in the grass and a swing from the tree. The windows and the lantern
@@ -4983,6 +5175,7 @@ function animate() {
   updateInsects(serverNow() / 1000);
   updateFireflies(serverNow() / 1000);
   updateCows(serverNow() / 1000);
+  updateHens(serverNow() / 1000);
   updateHills();
   updateCottage(serverNow() / 1000);
   updateDrops(now);
