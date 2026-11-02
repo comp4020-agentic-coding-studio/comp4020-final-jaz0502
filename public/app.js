@@ -734,7 +734,7 @@ scene.background = new THREE.Color(0xbfe3f0);
 // Low enough, and aimed a little above the bed, that a strip of sky shows above
 // the horizon behind it.
 const CAMERA_TARGET = new THREE.Vector3(0, 0.7, 0);
-const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 120);
+const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 160);
 // From outside the square, looking across Bed 1 towards the other beds, so they
 // show in the distance and can be hovered and clicked to go there.
 camera.position.set(-6.5, 4.2, 6.5);
@@ -898,11 +898,14 @@ function discTexture() {
 }
 const DISC_TEXTURE = discTexture();
 
+const SKY_DISC_MAX_RISE = 0.3; // about 17 degrees at midday, just clear of the far ridge (near 13)
+const SKY_DISC_DISTANCE = 100; // past the furthest hills (76), inside the camera's far plane
 function skyDisc(size, colour) {
   const disc = new THREE.Sprite(
     new THREE.SpriteMaterial({ map: DISC_TEXTURE, color: colour, transparent: true, fog: false }),
   );
   disc.scale.set(size, size, 1);
+  disc.userData.size = size;
   return disc;
 }
 const sunDisc = skyDisc(4.4, 0xffe08a);
@@ -1060,6 +1063,17 @@ function placeOnArc(mesh, angle) {
   const opacity = Math.min(Math.max(Math.sin(angle) * 5, 0), 1);
   mesh.material.opacity = opacity;
   mesh.visible = opacity > 0.01;
+  // Out past the hills and the far trees, on a higher arc than the ground one above, so at
+  // midday it clears the ridge and as it sets it goes down behind the hills and the trees in
+  // front of them, instead of being drawn on top of them.
+  const away = mesh.position.clone().sub(camera.position).setY(0).normalize();
+  const rise = Math.sin(angle) * SKY_DISC_MAX_RISE;
+  mesh.position.set(
+    camera.position.x + away.x * Math.cos(rise) * SKY_DISC_DISTANCE,
+    camera.position.y + Math.sin(rise) * SKY_DISC_DISTANCE,
+    camera.position.z + away.z * Math.cos(rise) * SKY_DISC_DISTANCE,
+  );
+  mesh.scale.setScalar(mesh.userData.size * (SKY_DISC_DISTANCE / 45));
 }
 
 function updateSky() {
@@ -1116,7 +1130,11 @@ function updateSky() {
   skyLight.position.set(Math.cos(lightAngle) * SKY_DISTANCE, Math.max(height, 0.05) * SKY_DISTANCE, SKY_DISTANCE * 0.35);
   skyLight.color.copy(blendColour(lightColour, from.light, to.light, t));
   skyLight.intensity = (from.lightI + (to.lightI - from.lightI) * t) * Math.min(Math.max(height / 0.3, 0), 1) * (1 - 0.55 * weatherNow.cloud);
-  ground.material.color.setScalar(1 - 0.24 * weatherNow.rainAmt);
+  updateSeasonState();
+  // Rain darkens the lawn; a winter lawn is under snow, which rain does not darken.
+  const wet = 1 - 0.24 * weatherNow.rainAmt * (1 - seasonNow.snow);
+  ground.material.color.copy(seasonNow.lawn).multiplyScalar(wet);
+  ground.material.emissive.setScalar(0.5 * seasonNow.snow * (0.3 + 0.7 * dayness));
 }
 
 // Weather: clear, overcast or rain, drifting from one to the next every half a day. Like
@@ -1238,14 +1256,234 @@ const rain = (() => {
 
 function updateRain() {
   // With reduced motion the sky still darkens, but no streaks are drawn.
-  const shown = weatherNow.rainAmt > 0.02 && !stillMotion.matches;
+  const shown = weatherNow.rainAmt * (1 - seasonNow.snow) > 0.02 && !stillMotion.matches;
   rain.visible = shown;
   if (!shown) return;
-  rainUniforms.amount.value = weatherNow.rainAmt;
+  rainUniforms.amount.value = weatherNow.rainAmt * (1 - seasonNow.snow);
   rainUniforms.time.value = performance.now() / 1000;
   rainUniforms.centre.value.copy(camera.position);
   // The drops are as bright as the clouds are: pale by day, dim at night.
   rainUniforms.colour.value.copy(cloudColour);
+}
+
+// Seasons: spring, summer, autumn and winter, each two garden days long and then the next.
+// Like the weather and the cows it is a pure function of the server's clock, so everyone
+// sees the same season at the same moment. It only changes colours and what falls from the
+// sky: the lawn, the hills and the leaves of the far trees, leaves in autumn, snow in
+// winter. Nothing is sent, stored or logged, and a plant, a plot and every action are the
+// same in every season.
+const SEASON_DAYS = 2;
+const SEASONS = [
+  // lawn multiplies the grass texture; leaf multiplies the far broadleaf trees; hill the hills
+  { lawn: [0.82, 1.3, 0.95], leaf: [0.85, 1.3, 0.9], hill: [0.85, 1.2, 0.95], fall: 0, petal: 1, snow: 0 }, // spring
+  { lawn: [1.12, 0.92, 0.62], leaf: [0.9, 0.85, 0.7], hill: [1.1, 0.95, 0.7], fall: 0, petal: 0, snow: 0 }, // summer
+  { lawn: [1.75, 1.0, 0.5], leaf: [3.0, 1.0, 0.3], hill: [1.9, 0.95, 0.5], fall: 1, petal: 0, snow: 0 }, // autumn
+  { lawn: [2.6, 2.7, 3.0], leaf: [1.15, 1.1, 1.05], hill: [1.5, 1.6, 1.8], fall: 0, petal: 0, snow: 1 }, // winter
+];
+const seasonNow = { lawn: new THREE.Color(), leaf: new THREE.Color(), hill: new THREE.Color(), fall: 0, petal: 0, snow: 0, index: 0 };
+
+function seasonAt(ms) {
+  const length = dayLengthMs * SEASON_DAYS;
+  const s = (((ms / length) % 4) + 4) % 4;
+  const index = Math.floor(s);
+  // The last third of a season is the change to the next one.
+  const k = smooth(clamp01((s - index - 0.67) / 0.33));
+  return { index, k, from: SEASONS[index], to: SEASONS[(index + 1) % 4] };
+}
+
+function updateSeasonState() {
+  const pinned = window.__season;
+  const { index, k, from, to } = pinned !== undefined ? { index: Math.floor(pinned), k: 0, from: SEASONS[Math.floor(pinned) % 4], to: SEASONS[Math.floor(pinned) % 4] } : seasonAt(serverNow());
+  const mix = (a, b) => a + (b - a) * k;
+  for (const key of ["lawn", "leaf", "hill"]) seasonNow[key].setRGB(mix(from[key][0], to[key][0]), mix(from[key][1], to[key][1]), mix(from[key][2], to[key][2]));
+  seasonNow.fall = mix(from.fall, to.fall);
+  seasonNow.petal = mix(from.petal, to.petal);
+  seasonNow.snow = mix(from.snow, to.snow);
+  seasonNow.index = index;
+}
+
+// What falls: autumn leaves, and snow in winter (a light fall even when it is clear, heavier
+// under cloud). Points in a box that follows the camera, wrapped on the graphics card like
+// the rain. With reduced motion nothing falls.
+const FALL_COUNT = 1560; // leaves and petals show a third of these, snow shows them all
+const fallUniforms = {
+  time: { value: 0 },
+  centre: { value: new THREE.Vector3() },
+  leaves: { value: 0 },
+  snow: { value: 0 },
+  petals: { value: 0 },
+  floorY: { value: GROUND_Y },
+  scale: { value: 300 },
+  shapes: { value: null },
+};
+// The shapes that fall, drawn once: an autumn leaf with a stalk and veins on the left, a
+// curled blossom petal on the right. They are white and grey, and the colour is put on by
+// the shader, so one picture serves every colour of leaf.
+function fallShapes() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 128;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d");
+  // Leaf: a pointed oval with a slightly lobed edge, a stalk and a midrib with side veins.
+  ctx.save();
+  ctx.translate(32, 32);
+  ctx.rotate(-Math.PI / 2);
+  ctx.beginPath();
+  ctx.moveTo(-26, 0);
+  ctx.bezierCurveTo(-18, -17, -4, -22, 4, -16);
+  ctx.bezierCurveTo(12, -20, 20, -10, 27, 0);
+  ctx.bezierCurveTo(20, 10, 12, 20, 4, 16);
+  ctx.bezierCurveTo(-4, 22, -18, 17, -26, 0);
+  ctx.closePath();
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(90,90,90,0.75)";
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(-30, 0);
+  ctx.lineTo(24, 0);
+  for (const x of [-16, -6, 4, 14]) {
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x + 7, -8);
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x + 7, 8);
+  }
+  ctx.stroke();
+  ctx.restore();
+  // Petal: a rounded teardrop with a notch at the tip and a pale line down its middle.
+  ctx.save();
+  ctx.translate(96, 32);
+  ctx.rotate(-Math.PI / 2);
+  ctx.beginPath();
+  ctx.moveTo(-22, 0);
+  ctx.bezierCurveTo(-14, -15, 8, -20, 20, -6);
+  ctx.lineTo(24, -1);
+  ctx.lineTo(20, 4);
+  ctx.bezierCurveTo(8, 20, -14, 15, -22, 0);
+  ctx.closePath();
+  const fill = ctx.createLinearGradient(-22, 0, 24, 0);
+  fill.addColorStop(0, "#d8d8d8");
+  fill.addColorStop(1, "#ffffff");
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.strokeStyle = "rgba(150,150,150,0.55)";
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(-20, 0);
+  ctx.lineTo(16, 0);
+  ctx.stroke();
+  ctx.restore();
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+fallUniforms.shapes.value = fallShapes();
+
+const fall = (() => {
+  const base = new Float32Array(FALL_COUNT * 3);
+  const rand = new Float32Array(FALL_COUNT);
+  for (let i = 0; i < FALL_COUNT; i++) {
+    base.set([seeded(9100 + i) * 40, seeded(9200 + i) * 14, seeded(9300 + i) * 40], i * 3);
+    rand[i] = seeded(9400 + i);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(base, 3));
+  geometry.setAttribute("aRand", new THREE.BufferAttribute(rand, 1));
+  const material = new THREE.ShaderMaterial({
+    uniforms: fallUniforms,
+    transparent: true,
+    depthWrite: false,
+    vertexShader: `
+      attribute float aRand;
+      uniform float time;
+      uniform vec3 centre;
+      uniform float leaves;
+      uniform float snow;
+      uniform float petals;
+      uniform float floorY;
+      uniform float scale;
+      varying float vAlpha;
+      varying vec3 vColour;
+      varying float vSnow;
+      varying float vPetal;
+      varying float vSpin;
+      varying float vFlip;
+      void main() {
+        float height = 14.0;
+        // Each flake, petal or leaf is one kind, in the share the seasons are blending.
+        float total = max(leaves + petals + snow, 0.001);
+        float isSnow = step(fract(aRand * 3.91), snow / total);
+        float isPetal = (1.0 - isSnow) * step(fract(aRand * 7.7), petals / max(leaves + petals, 0.001));
+        float speed = mix(0.9 + aRand * 0.7, 1.1 + aRand * 1.2, isSnow) * mix(1.0, 0.7, isPetal);
+        float y = mod(position.y - time * speed, height);
+        vec2 rel = mod(position.xz - centre.xz + 20.0, 40.0) - 20.0;
+        float sway = sin(time * (0.7 + aRand) + aRand * 40.0) * mix(1.1, 0.5, isSnow);
+        vec3 p = vec3(centre.x + rel.x + sway, floorY + y, centre.z + rel.y + cos(time * 0.6 + aRand * 31.0) * 0.8);
+        vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        float amount = max(max(leaves, petals), snow);
+        float shown = step(fract(aRand * 5.17), amount * mix(0.34, 1.0, isSnow));
+        float edge = 1.0 - smoothstep(11.0, 20.0, length(rel));
+        float ends = smoothstep(0.0, 0.5, y) * (1.0 - smoothstep(height - 1.5, height, y));
+        vAlpha = shown * edge * ends * smoothstep(2.5, 7.0, -mv.z);
+        vSnow = isSnow;
+        vPetal = isPetal;
+        // Each one turns as it falls, and tips over now and then, like a real leaf.
+        vSpin = aRand * 6.2832 + time * (0.6 + aRand * 1.6) * (aRand > 0.5 ? 1.0 : -1.0);
+        vFlip = 0.35 + 0.65 * abs(cos(time * (0.9 + aRand * 1.4) + aRand * 20.0));
+        float h = fract(aRand * 13.7);
+        vec3 leafColour = h < 0.4 ? vec3(0.86, 0.38, 0.12) : h < 0.75 ? vec3(0.78, 0.2, 0.1) : vec3(0.92, 0.7, 0.18);
+        vec3 petalColour = h < 0.5 ? vec3(1.0, 0.76, 0.84) : vec3(1.0, 0.9, 0.93);
+        vColour = mix(mix(leafColour, petalColour, isPetal), vec3(0.97, 0.98, 1.0), isSnow);
+        gl_PointSize = min(mix(mix(0.42, 0.26, isPetal), 0.13, isSnow) * scale / max(-mv.z, 0.5), 60.0);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      uniform sampler2D shapes;
+      varying float vAlpha;
+      varying vec3 vColour;
+      varying float vSnow;
+      varying float vPetal;
+      varying float vSpin;
+      varying float vFlip;
+      void main() {
+        vec2 d = gl_PointCoord - 0.5;
+        float soft = 1.0 - smoothstep(0.18, 0.5, length(d));
+        // Turn the picture, and squash it across one way so it seems to tumble.
+        float s = sin(vSpin);
+        float k = cos(vSpin);
+        vec2 r = vec2(k * d.x + s * d.y, -s * d.x + k * d.y);
+        r.x /= vFlip;
+        vec2 uv = r + 0.5;
+        float inside = step(0.0, uv.x) * step(uv.x, 1.0) * step(0.0, uv.y) * step(uv.y, 1.0);
+        vec4 tex = texture2D(shapes, vec2(uv.x * 0.5 + 0.5 * vPetal, uv.y));
+        vec3 shade = mix(tex.rgb, vec3(1.0), vSnow);
+        float a = mix(tex.a * inside, soft, vSnow) * vAlpha;
+        if (a < 0.02) discard;
+        gl_FragColor = vec4(vColour * shade, a);
+      }`,
+  });
+  const points = new THREE.Points(geometry, material);
+  points.frustumCulled = false;
+  points.visible = false;
+  scene.add(points);
+  return points;
+})();
+
+function updateFall() {
+  // Nothing falls in summer: leaves and petals begin once their season is half-way in.
+  const leaves = Math.max(0, seasonNow.fall * 2 - 1) * 0.7;
+  // A light snowfall in a clear winter, heavy when it is overcast or raining.
+  const snow = seasonNow.snow * (0.3 + 0.7 * Math.max(weatherNow.rainAmt, weatherNow.cloud * 0.5));
+  const petals = Math.max(0, seasonNow.petal * 2 - 1) * 0.6;
+  const shown = (leaves > 0.02 || snow > 0.02 || petals > 0.02) && !stillMotion.matches;
+  fall.visible = shown;
+  if (!shown) return;
+  fallUniforms.leaves.value = leaves;
+  fallUniforms.snow.value = snow > 0.02 ? snow : 0;
+  fallUniforms.petals.value = petals > 0.02 ? petals : 0;
+  fallUniforms.time.value = performance.now() / 1000;
+  fallUniforms.centre.value.copy(camera.position);
+  fallUniforms.scale.value = renderer.domElement.height * 0.5;
 }
 
 const bedBaseGeometry = new THREE.BoxGeometry(COLS * SPACING + 0.6, 0.3, COLS * SPACING + 0.6);
@@ -1542,6 +1780,8 @@ for (const [kind, material, extra, height] of [["fringe", fringeMaterial, 0.3, 0
     geometry.setAttribute("normal", new THREE.Float32BufferAttribute(new Array(positions.length).fill(0).map((_, k) => (k % 3 === 1 ? 1 : 0)), 3));
     geometry.setIndex(indices);
     const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: material.color, flatShading: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: material.polygonOffsetFactor, polygonOffsetUnits: material.polygonOffsetUnits }));
+    // Share the colour object, so the snow that whitens the earth whitens the strips too.
+    mesh.material.color = material.color;
     scene.add(mesh);
   });
 }
@@ -4809,13 +5049,52 @@ const leafyGeometry = mergeParts([
   ].map(([x, y, z, r, colour]) => ({ geometry: new THREE.IcosahedronGeometry(1, 1), colour, position: [x, y, z], scale: [r, r * 0.88, r] })),
 ]);
 
+// The seasons act on the trees in the shader: the crowns blush pink in spring, turn red,
+// orange and yellow in autumn, and under snow every crown and fir wears a white cap. The
+// trunk is told from the crown by its colour (brown against green), and a crown's hue is
+// picked from how green its own clump is, so each clump differs a little.
+const treeSeason = { blossom: { value: 0 }, autumn: { value: 0 }, snow: { value: 0 } };
+function patchTreeMaterial(material, isCrown) {
+  material.customProgramCacheKey = () => (isCrown ? "tree-crown" : "tree-fir");
+  material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, treeSeason);
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nvarying float vTreeUp;\nvarying float vTreeY;")
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvTreeUp = normal.y;\nvTreeY = position.y;");
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", "#include <common>\nuniform float blossom;\nuniform float autumn;\nuniform float snow;\nvarying float vTreeUp;\nvarying float vTreeY;")
+      .replace("#include <color_fragment>", `#include <color_fragment>
+        ${isCrown ? `
+        float crown = smoothstep(0.02, 0.08, vColor.g - vColor.r);
+        float t = clamp((vColor.g - 0.2) / 0.24, 0.0, 1.0);
+        vec3 pink = vec3(0.98, 0.7, 0.8) * (0.88 + 0.3 * t);
+        vec3 red = vec3(0.74, 0.18, 0.1);
+        vec3 orange = vec3(0.92, 0.46, 0.1);
+        vec3 yellow = vec3(0.95, 0.74, 0.2);
+        vec3 turned = t < 0.5 ? mix(red, orange, t * 2.0) : mix(orange, yellow, (t - 0.5) * 2.0);
+        vec3 crownColour = diffuseColor.rgb;
+        crownColour = mix(crownColour, pink * diffuse, blossom);
+        crownColour = mix(crownColour, turned * diffuse, autumn);
+        diffuseColor.rgb = mix(diffuseColor.rgb, crownColour, crown);
+        float cap = smoothstep(0.1, 0.5, vTreeUp) * snow * crown;
+        ` : `
+        float cap = smoothstep(0.3, 0.45, vTreeUp) * smoothstep(0.5, 2.6, vTreeY) * snow;
+        `}
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.95, 0.97, 1.0), cap);`);
+  };
+}
+
 const TREE_BELTS = [
   { inner: 32, outer: 40, count: 80, haze: 0.16, size: [1.5, 2.6] },
   { inner: 43, outer: 54, count: 130, haze: 0.38, size: [2.0, 3.4] },
 ].map((belt, beltIndex) => {
   const material = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, fog: false });
+  // The broadleaf trees change with the seasons and the firs do not, so each has its own.
+  const leafMaterial = material.clone();
+  patchTreeMaterial(material, false);
+  patchTreeMaterial(leafMaterial, true);
   const firs = new THREE.InstancedMesh(firGeometry, material, belt.count);
-  const leafy = new THREE.InstancedMesh(leafyGeometry, material, belt.count);
+  const leafy = new THREE.InstancedMesh(leafyGeometry, leafMaterial, belt.count);
   const dummy = new THREE.Object3D();
   const tint = new THREE.Color();
   let firN = 0;
@@ -4848,21 +5127,61 @@ const TREE_BELTS = [
     mesh.instanceColor.needsUpdate = true;
     scene.add(mesh);
   }
-  return { material, ...belt };
+  return { material, leafMaterial, ...belt };
 });
 
+// Under snow the paths, the roofs and the firs go white, a little less than the lawn so the
+// paths still read as paths. Each colour is mixed from the one it started with, so the
+// thaw brings every one of them back exactly.
+let snowCovered = null;
+function snowCover() {
+  if (!snowCovered) {
+    const roofs = [coopMat.roof, barnMat.roof, ...cottageMat.thatch];
+    snowCovered = [
+      [earthMaterial, 0.8], [fringeMaterial, 0.85], [laneMaterial, 0.85], ...stoneMaterials.map((m) => [m, 0.5]), ...roofs.map((m) => [m, 0.86]),
+    ].map(([material, amount]) => ({ material, amount, base: material.color.clone() }));
+  }
+  const white = hillBase.set(0xf2f6fb);
+  for (const { material, amount, base } of snowCovered) material.color.copy(base).lerp(white, amount * seasonNow.snow);
+}
+
+// The cottage's own tree turns with the seasons the same way the belts do.
+let cottageLeaves = null;
+const blossomPink = new THREE.Color(0xf6b4c6);
+const autumnOrange = new THREE.Color(0xd9661a);
+const autumnRed = new THREE.Color(0xb8321a);
+function seasonCottageTree() {
+  if (!cottageLeaves) cottageLeaves = [cottageMat.leaf, cottageMat.leafLight].map((material) => ({ material, base: material.color.clone() }));
+  cottageLeaves.forEach(({ material, base }, i) => {
+    material.color.copy(base)
+      .lerp(blossomPink, seasonNow.petal)
+      .lerp(i ? autumnOrange : autumnRed, seasonNow.fall)
+      .lerp(hillBase.set(0xf2f6fb), 0.9 * seasonNow.snow);
+  });
+}
+
 function updateHills() {
+  snowCover();
+  seasonCottageTree();
+  treeSeason.blossom.value = seasonNow.petal;
+  treeSeason.autumn.value = seasonNow.fall;
+  treeSeason.snow.value = seasonNow.snow;
   for (const ring of hillRings) {
     hillBase.set(ring.colour);
     for (const channel of ["r", "g", "b"]) {
       hillBase[channel] *= Math.min(1, ambient.color[channel] * ambient.intensity * 1.4);
     }
+    hillBase.multiply(seasonNow.hill);
     ring.material.color.copy(hillBase).lerp(skyColour, ring.haze);
   }
   // The trees keep their own colours and shading; the haze is added on top, as fog would.
   for (const belt of TREE_BELTS) {
     belt.material.color.setScalar(1 - belt.haze);
     belt.material.emissive.copy(skyColour).multiplyScalar(belt.haze);
+    belt.leafMaterial.color.setScalar(1 - belt.haze);
+    belt.leafMaterial.emissive.copy(skyColour).multiplyScalar(belt.haze);
+    // Under snow the broadleaf crowns go pale.
+    // And the firs carry snow on their boughs.
   }
 }
 
@@ -5690,6 +6009,7 @@ function animate() {
   updateRings(now);
   updateSky();
   updateRain();
+  updateFall();
   updateClouds(serverNow() / 1000);
   updateInsects(serverNow() / 1000);
   updateFireflies(serverNow() / 1000);
