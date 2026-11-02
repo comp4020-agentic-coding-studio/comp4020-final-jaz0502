@@ -1143,6 +1143,11 @@ body.photo-mode #own-bar {
     display: none;
   }
 
+  /* The hint sits just under the bar, not behind it. */
+  body.own-mode #status-bar {
+    top: 76px;
+  }
+
   .own-note {
     font-size: 0.8rem;
   }
