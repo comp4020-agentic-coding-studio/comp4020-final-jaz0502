@@ -1018,6 +1018,7 @@ function updateClouds(timeSeconds) {
   // at noon, a pale peach against a sunset and a dim blue at night.
   const brightness = skyColour.r * 0.2126 + skyColour.g * 0.7152 + skyColour.b * 0.0722;
   cloudColour.copy(skyColour).lerp(CLOUD_WHITE, Math.min(0.2 + 0.85 * brightness, 0.95));
+  cloudColour.multiplyScalar(1 - 0.34 * weatherNow.cloud);
   for (const material of cloudMaterials) material.color.copy(cloudColour);
 
   for (const cloud of clouds) {
@@ -1025,10 +1026,16 @@ function updateClouds(timeSeconds) {
     cloud.group.position.set(Math.cos(theta) * cloud.radius, cloud.height, Math.sin(theta) * cloud.radius);
     // The cloud's long axis lies along its path.
     cloud.group.rotation.y = -(theta + Math.PI / 2);
+    // Under cloud they swell and sink until they run into one another.
+    cloud.group.scale.setScalar(1 + 0.9 * weatherNow.cloud);
+    cloud.group.position.y -= 1.2 * weatherNow.cloud;
   }
 }
 
 let dayness = 1;
+// How dark the night is, from the sky's own timetable. Lamps and fireflies follow this, so
+// they still glow on a rainy night even though cloud hides the stars.
+let skyNight = 0;
 
 const skyColour = new THREE.Color();
 const ambientColour = new THREE.Color();
@@ -1056,6 +1063,7 @@ function placeOnArc(mesh, angle) {
 }
 
 function updateSky() {
+  updateWeatherState();
   const phase = (((serverNow() % dayLengthMs) + dayLengthMs) % dayLengthMs) / dayLengthMs;
   let i = 0;
   while (i < SKY_KEYS.length - 2 && SKY_KEYS[i + 1].at <= phase) i++;
@@ -1064,15 +1072,24 @@ function updateSky() {
   const t = (phase - from.at) / (to.at - from.at);
 
   blendColour(skyColour, from.sky, to.sky, t);
+  greyOut(skyColour, 0.72 * weatherNow.cloud);
   scene.fog.color.copy(skyColour);
   skyUniforms.horizonColour.value.copy(skyColour);
   blendColour(skyUniforms.midColour.value, from.mid, to.mid, t);
   blendColour(skyUniforms.topColour.value, from.top, to.top, t);
-  skyUniforms.glow.value = from.glow + (to.glow - from.glow) * t;
+  greyOut(skyUniforms.midColour.value, 0.78 * weatherNow.cloud);
+  greyOut(skyUniforms.topColour.value, 0.85 * weatherNow.cloud);
+  skyUniforms.glow.value = (from.glow + (to.glow - from.glow) * t) * (1 - 0.85 * weatherNow.cloud);
   ambient.color.copy(blendColour(ambientColour, from.ambient, to.ambient, t));
-  ambient.intensity = from.ambientI + (to.ambientI - from.ambientI) * t;
-  stars.material.opacity = from.stars + (to.stars - from.stars) * t;
+  greyOut(ambient.color, 0.5 * weatherNow.cloud);
+  ambient.intensity = (from.ambientI + (to.ambientI - from.ambientI) * t) * (1 - 0.12 * weatherNow.cloud);
+  skyNight = from.stars + (to.stars - from.stars) * t;
+  // Cloud hides the stars, but not the night: skyNight is what lamps follow.
+  stars.material.opacity = skyNight * (1 - 0.92 * weatherNow.cloud);
   stars.visible = stars.material.opacity > 0.01;
+  // The fog closes in under cloud and rain.
+  scene.fog.near = 22 - 8 * weatherNow.cloud;
+  scene.fog.far = 60 - 14 * weatherNow.cloud;
 
   // The sun is up from 0.25 to 0.75 and the moon the rest of the time.
   const sunAngle = ((phase - 0.25) / 0.5) * Math.PI;
@@ -1082,6 +1099,11 @@ function updateSky() {
   dayness = phase >= 0.25 && phase < 0.75 ? Math.min(Math.max(Math.sin(sunAngle) / 0.35, 0), 1) : 0;
   placeOnArc(sunDisc, sunAngle);
   placeOnArc(moonDisc, moonAngle);
+  // Cloud covers the sun and the moon.
+  for (const disc of [sunDisc, moonDisc]) {
+    disc.material.opacity *= 1 - 0.92 * weatherNow.cloud;
+    disc.visible = disc.material.opacity > 0.01;
+  }
   // The dome stays centred on the camera, and its glow sits where the sun is.
   skyDome.position.copy(camera.position);
   stars.position.copy(camera.position);
@@ -1093,7 +1115,137 @@ function updateSky() {
   const height = Math.sin(lightAngle);
   skyLight.position.set(Math.cos(lightAngle) * SKY_DISTANCE, Math.max(height, 0.05) * SKY_DISTANCE, SKY_DISTANCE * 0.35);
   skyLight.color.copy(blendColour(lightColour, from.light, to.light, t));
-  skyLight.intensity = (from.lightI + (to.lightI - from.lightI) * t) * Math.min(Math.max(height / 0.3, 0), 1);
+  skyLight.intensity = (from.lightI + (to.lightI - from.lightI) * t) * Math.min(Math.max(height / 0.3, 0), 1) * (1 - 0.55 * weatherNow.cloud);
+  ground.material.color.setScalar(1 - 0.24 * weatherNow.rainAmt);
+}
+
+// Weather: clear, overcast or rain, drifting from one to the next every half a day. Like
+// the clouds and the cows it is a pure function of the server's clock, so everyone sees the
+// same sky at the same moment, and it is only a picture: nothing is sent, stored or logged,
+// and it never waters a plant or changes a plot, so it limits nothing and depends on nothing.
+const WEATHER_KINDS = [
+  { cloud: 0, rain: 0 }, // clear
+  { cloud: 0.65, rain: 0 }, // overcast
+  { cloud: 1, rain: 1 }, // rain
+];
+const weatherNow = { cloud: 0, rain: 0, rainAmt: 0 };
+const weatherGrey = new THREE.Color();
+
+function weatherKind(period) {
+  const r = seeded(period * 13.7 + 5);
+  return r < 0.5 ? 0 : r < 0.75 ? 1 : 2;
+}
+
+// What the weather is at a moment, in the units of the clouds and the rain. The first fifth
+// of each period is the change from the one before, so it comes and goes gradually.
+function weatherAt(ms) {
+  const period = dayLengthMs / 2;
+  const index = Math.floor(ms / period);
+  const into = (ms - index * period) / period;
+  const k = smooth(clamp01(into / 0.2));
+  const from = WEATHER_KINDS[weatherKind(index - 1)];
+  const to = WEATHER_KINDS[weatherKind(index)];
+  return { cloud: from.cloud + (to.cloud - from.cloud) * k, rain: from.rain + (to.rain - from.rain) * k };
+}
+
+function updateWeatherState() {
+  const w = weatherAt(serverNow());
+  weatherNow.cloud = w.cloud;
+  weatherNow.rain = w.rain;
+  // Rain only shows once the sky has clouded over, and then thickens.
+  weatherNow.rainAmt = clamp01((w.rain - 0.35) / 0.65);
+}
+
+// The colour mixed toward its own grey: the same brightness with the colour taken out.
+function greyOut(colour, amount) {
+  const lum = colour.r * 0.2126 + colour.g * 0.7152 + colour.b * 0.0722;
+  weatherGrey.setScalar(lum * 0.85);
+  colour.lerp(weatherGrey, amount);
+}
+
+// Rain: a few thousand thin streaks in a box that follows the camera. Each one falls on the
+// graphics card and wraps round the camera, so the rain stays put in the world as you look
+// about, and thins out toward the edge. Streaks come in with the rain's strength.
+const RAIN_DROPS = 3200;
+const rainUniforms = {
+  time: { value: 0 },
+  amount: { value: 0 },
+  centre: { value: new THREE.Vector3() },
+  colour: { value: new THREE.Color(0xbfd2e0) },
+  floorY: { value: GROUND_Y },
+};
+const rain = (() => {
+  const base = new Float32Array(RAIN_DROPS * 2 * 3);
+  const end = new Float32Array(RAIN_DROPS * 2);
+  const rand = new Float32Array(RAIN_DROPS * 2);
+  for (let i = 0; i < RAIN_DROPS; i++) {
+    const x = seeded(8100 + i) * 40;
+    const y = seeded(8200 + i) * 14;
+    const z = seeded(8300 + i) * 40;
+    const r = seeded(8400 + i);
+    for (let k = 0; k < 2; k++) {
+      base.set([x, y, z], (i * 2 + k) * 3);
+      end[i * 2 + k] = k;
+      rand[i * 2 + k] = r;
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(base, 3));
+  geometry.setAttribute("aEnd", new THREE.BufferAttribute(end, 1));
+  geometry.setAttribute("aRand", new THREE.BufferAttribute(rand, 1));
+  const material = new THREE.ShaderMaterial({
+    uniforms: rainUniforms,
+    transparent: true,
+    depthWrite: false,
+    vertexShader: `
+      attribute float aEnd;
+      attribute float aRand;
+      uniform float time;
+      uniform float amount;
+      uniform vec3 centre;
+      uniform float floorY;
+      varying float vAlpha;
+      void main() {
+        float height = 14.0;
+        float speed = 13.0 + aRand * 6.0;
+        float y = mod(position.y - time * speed, height);
+        vec2 rel = mod(position.xz - centre.xz + 20.0, 40.0) - 20.0;
+        // Slanted: it drifts sideways as it falls, and the streak leans back along its path.
+        float lean = 0.16;
+        vec3 p = vec3(centre.x + rel.x + lean * (height - y), floorY + y, centre.z + rel.y);
+        p += aEnd * vec3(-lean, 1.0, 0.0) * 0.55;
+        vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        float shown = step(fract(aRand * 7.31), amount);
+        float edge = 1.0 - smoothstep(11.0, 20.0, length(rel));
+        float ends = smoothstep(0.0, 1.2, y) * (1.0 - smoothstep(height - 1.5, height, y));
+        float nearLens = smoothstep(1.0, 3.0, -mv.z);
+        vAlpha = shown * edge * ends * nearLens * 0.75;
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      uniform vec3 colour;
+      varying float vAlpha;
+      void main() {
+        gl_FragColor = vec4(colour, vAlpha);
+      }`,
+  });
+  const lines = new THREE.LineSegments(geometry, material);
+  lines.frustumCulled = false;
+  lines.visible = false;
+  scene.add(lines);
+  return lines;
+})();
+
+function updateRain() {
+  // With reduced motion the sky still darkens, but no streaks are drawn.
+  const shown = weatherNow.rainAmt > 0.02 && !stillMotion.matches;
+  rain.visible = shown;
+  if (!shown) return;
+  rainUniforms.amount.value = weatherNow.rainAmt;
+  rainUniforms.time.value = performance.now() / 1000;
+  rainUniforms.centre.value.copy(camera.position);
+  // The drops are as bright as the clouds are: pale by day, dim at night.
+  rainUniforms.colour.value.copy(cloudColour);
 }
 
 const bedBaseGeometry = new THREE.BoxGeometry(COLS * SPACING + 0.6, 0.3, COLS * SPACING + 0.6);
@@ -2331,7 +2483,8 @@ function insectPath(kind, t, seed) {
 }
 
 function updateInsects(timeSeconds) {
-  const size = dayness * dayness * (3 - 2 * dayness);
+  // They come out with the sun and shelter from the rain.
+  const size = dayness * dayness * (3 - 2 * dayness) * (1 - clamp01(weatherNow.rainAmt * 2));
 
   for (const [position, obj] of sceneObjects) {
     const plot = plots.get(position);
@@ -5505,7 +5658,7 @@ const fireflies = (() => {
 const stillMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 function updateFireflies(timeSeconds) {
-  const night = stars.visible ? stars.material.opacity : 0;
+  const night = skyNight;
   for (const { halo, globeMaterial } of gardenLightGlows) {
     halo.material.opacity = 0.75 * night;
     globeMaterial.emissiveIntensity = 0.25 + 0.9 * night;
@@ -5514,9 +5667,10 @@ function updateFireflies(timeSeconds) {
   for (const { group } of ownDecorBuilt.values()) {
     if (group.userData.halo) group.userData.halo.material.opacity = 0.9 * night;
   }
-  fireflies.visible = night > 0.02;
+  const fireflyNight = night * (1 - clamp01(weatherNow.rainAmt * 2));
+  fireflies.visible = fireflyNight > 0.02;
   if (!fireflies.visible) return;
-  fireflyUniforms.night.value = night;
+  fireflyUniforms.night.value = fireflyNight;
   // With reduced motion they hold still and only glow softly.
   // The page's own clock, not the server's: the server's is about 1.7 billion seconds,
   // too big for the shader's floats to move in steps smaller than a couple of minutes.
@@ -5535,6 +5689,7 @@ function animate() {
   tickAnimations(now);
   updateRings(now);
   updateSky();
+  updateRain();
   updateClouds(serverNow() / 1000);
   updateInsects(serverNow() / 1000);
   updateFireflies(serverNow() / 1000);
