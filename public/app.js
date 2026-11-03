@@ -5998,6 +5998,149 @@ function updateFireflies(timeSeconds) {
   fireflyUniforms.pixelsPerUnit.value = size.y / (2 * Math.tan((camera.fov * Math.PI) / 360));
 }
 
+// After rain: puddles on the lawn and, if the sun is out as the rain clears, a rainbow.
+// Like the weather they are a pure function of the server's clock, so everyone sees the
+// same ones at the same moment. They are only a picture: nothing is sent, stored or logged,
+// and a puddle never waters a plant or stops anyone walking or acting.
+
+// How much rain has fallen lately, from 0 to 1, fading over `span` milliseconds.
+function recentRain(ms, span) {
+  let wet = 0;
+  for (let i = 0; i <= 8; i++) {
+    const rainAmt = clamp01((weatherAt(ms - (i * span) / 8).rain - 0.35) / 0.65);
+    wet = Math.max(wet, rainAmt * (1 - i / 8));
+  }
+  return wet;
+}
+
+const puddleUniforms = { time: { value: 0 }, rain: { value: 0 }, sky: { value: new THREE.Color() } };
+const puddleMaterial = new THREE.ShaderMaterial({
+  uniforms: puddleUniforms,
+  transparent: true,
+  depthWrite: false,
+  polygonOffset: true,
+  polygonOffsetFactor: -3,
+  polygonOffsetUnits: -3,
+  vertexShader: `
+    varying vec2 vUv;
+    varying vec2 vOrigin;
+    void main() {
+      vUv = uv;
+      vOrigin = modelMatrix[3].xz;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }`,
+  fragmentShader: `
+    uniform float time;
+    uniform float rain;
+    uniform vec3 sky;
+    varying vec2 vUv;
+    varying vec2 vOrigin;
+    void main() {
+      vec2 p = (vUv - 0.5) * 2.0;
+      float seed = fract(sin(dot(vOrigin, vec2(12.9898, 78.233))) * 43758.5453);
+      // A wobbly edge, so no two puddles are the same shape.
+      float d = length(p) * (1.0 + 0.1 * sin(atan(p.y, p.x) * 3.0 + seed * 20.0) + 0.05 * sin(atan(p.y, p.x) * 7.0 + seed * 9.0));
+      float edge = 1.0 - smoothstep(0.78, 1.0, d);
+      // Water shows the sky, a little darker toward the middle.
+      vec3 colour = mix(sky * 0.4, sky, 0.55 + 0.3 * smoothstep(0.0, 1.0, d));
+      // Raindrops make rings that spread and fade.
+      float rings = 0.0;
+      for (int k = 0; k < 2; k++) {
+        float phase = fract(time * 0.55 + seed + float(k) * 0.5);
+        rings += smoothstep(0.07, 0.0, abs(d - phase * 0.95)) * (1.0 - phase);
+      }
+      // Even on a dark night, water holds a little blue light.
+      colour = max(colour, vec3(0.1, 0.13, 0.19));
+      colour += rings * rain * 0.3;
+      gl_FragColor = vec4(colour, edge * 0.78);
+    }`,
+});
+const puddles = [];
+{
+  const geometry = new THREE.CircleGeometry(1, 28);
+  const avoid = [[BARN_AT, 6], [COTTAGE_AT, 7], [OWN_CENTRE, 8]];
+  let tries = 0;
+  for (let i = 0; puddles.length < 30 && tries < 900; tries++) {
+    const angle = seeded(7300 + tries * 3) * Math.PI * 2;
+    const radius = 13 + seeded(7301 + tries * 3) * 11;
+    const x = GARDEN_CENTRE.x + Math.cos(angle) * radius;
+    const z = GARDEN_CENTRE.z + Math.sin(angle) * radius;
+    // Keep them on open lawn: clear of the buildings, my garden and the dirt lanes.
+    if (avoid.some(([at, gap]) => Math.hypot(x - at.x, z - at.z) < gap)) continue;
+    if (laneSamples.some((l) => Math.hypot(x - l.x, z - l.z) < 2.2)) continue;
+    const mesh = new THREE.Mesh(geometry, puddleMaterial);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(x, GROUND_Y + 0.03, z);
+    mesh.userData.size = 1.3 + seeded(7302 + tries * 3) * 1.4;
+    mesh.userData.stretch = 0.6 + seeded(7303 + tries * 3) * 0.4;
+    mesh.userData.after = 0.55 + 0.45 * seeded(7304 + tries * 3); // the shallow ones dry first
+    mesh.visible = false;
+    mesh.renderOrder = 2;
+    scene.add(mesh);
+    puddles.push(mesh);
+    i++;
+  }
+}
+
+function updatePuddles() {
+  // Puddles gather as it rains and dry out over a quarter of a garden day. None under snow.
+  const wet = recentRain(serverNow(), dayLengthMs * 0.25) * (1 - seasonNow.snow);
+  puddleUniforms.time.value = stillMotion.matches ? 0.3 : performance.now() / 1000;
+  puddleUniforms.rain.value = stillMotion.matches ? 0 : weatherNow.rainAmt * (1 - seasonNow.snow);
+  puddleUniforms.sky.value.copy(skyColour);
+  for (const puddle of puddles) {
+    const size = clamp01((wet - 0.1) / 0.9 / puddle.userData.after) * puddle.userData.size;
+    puddle.visible = size > 0.05;
+    puddle.scale.set(size, size * puddle.userData.stretch, 1);
+  }
+}
+
+// The rainbow: a soft arc of seven colours, there for a little while when the rain has
+// just cleared and the sun is out. It hangs over the garden for show (a real one faces
+// away from the sun), at a fixed place in the world, so turning the view moves it.
+const RAINBOW_DISTANCE = 98;
+const RAINBOW_ANGLE = (30 * Math.PI) / 180; // its middle, from the centre of the arc
+const RAINBOW_AXIS = new THREE.Vector3(0.707, Math.sin((-6 * Math.PI) / 180), -0.707).normalize();
+const rainbow = (() => {
+  const bands = 28;
+  const inner = RAINBOW_DISTANCE * Math.tan(RAINBOW_ANGLE - 0.045);
+  const outer = RAINBOW_DISTANCE * Math.tan(RAINBOW_ANGLE + 0.045);
+  const geometry = new THREE.RingGeometry(inner, outer, 120, bands);
+  const stops = [0xff4d4d, 0xff9a3c, 0xffe24a, 0x5fd16a, 0x4aa8ff, 0x6a5cff, 0xb15cff].map((c) => new THREE.Color(c));
+  const colours = [];
+  const colour = new THREE.Color();
+  // RingGeometry lays its vertices ring by ring, from the inner edge outwards.
+  for (let band = 0; band <= bands; band++) {
+    const t = 1 - band / bands; // red is the outer edge
+    const at = t * (stops.length - 1);
+    const i = Math.min(Math.floor(at), stops.length - 2);
+    colour.copy(stops[i]).lerp(stops[i + 1], at - i);
+    const alpha = Math.sin((band / bands) * Math.PI);
+    for (let k = 0; k <= 120; k++) colours.push(colour.r, colour.g, colour.b, alpha * alpha);
+  }
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colours, 4));
+  const material = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0, depthWrite: false, fog: false, side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 1;
+  mesh.visible = false;
+  scene.add(mesh);
+  return mesh;
+})();
+
+function updateRainbow() {
+  const lift = Math.sin(Math.asin(Math.min(1, Math.max(0, sunDisc.position.y - camera.position.y) / SKY_DISC_DISTANCE)));
+  // Only with the sun up, but not high overhead, as the rain clears and the cloud lifts.
+  const sunUp = smooth(clamp01((lift - 0.02) / 0.1)) * (1 - smooth(clamp01((lift - 0.24) / 0.06)));
+  const cleared = recentRain(serverNow(), dayLengthMs * 0.2) * (1 - weatherNow.rainAmt) * (1 - clamp01((weatherNow.cloud - 0.1) / 0.5));
+  const amount = cleared * sunUp * (1 - seasonNow.snow);
+  rainbow.visible = amount > 0.02;
+  if (!rainbow.visible) return;
+  rainbow.material.opacity = 0.6 * amount;
+  rainbow.position.copy(camera.position).addScaledVector(RAINBOW_AXIS, RAINBOW_DISTANCE);
+  rainbow.lookAt(camera.position);
+}
+
 function animate() {
   requestAnimationFrame(animate);
   const now = performance.now();
@@ -6010,6 +6153,8 @@ function animate() {
   updateSky();
   updateRain();
   updateFall();
+  updatePuddles();
+  updateRainbow();
   updateClouds(serverNow() / 1000);
   updateInsects(serverNow() / 1000);
   updateFireflies(serverNow() / 1000);
