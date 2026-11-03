@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { type DecorationState, MAX_CREDIT, stateFor } from "./decorations.ts";
 import { GRID_SIZE } from "./garden.ts";
+import { type Pet, type PetKind, type PetState, petUnlocked } from "./pets.ts";
 import type { PlantType, Plot, PlotState } from "./types.ts";
 
 // Defaults to the Fly volume; overridable for local dev/CI where /data may
@@ -411,6 +412,43 @@ export function creditWatering(owner: string): boolean {
   }
   addCreditStmt.run(owner);
   return true;
+}
+
+// A pet for your own garden, the reward after the last decoration. One row per gardener,
+// keyed by the public id, never the cookie, and sent to that gardener alone. Only this many
+// gardeners keep one, so a stranger minting cookies can't grow the database without limit.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS pets (
+    owner TEXT PRIMARY KEY,
+    kind  TEXT NOT NULL,
+    name  TEXT NOT NULL
+  );
+`);
+
+const MAX_PET_KEEPERS = Number(process.env.MAX_PET_KEEPERS ?? 2000);
+
+const petStmt = db.prepare("SELECT kind, name FROM pets WHERE owner = ?");
+const petCountStmt = db.prepare("SELECT COUNT(*) AS n FROM pets");
+const setPetStmt = db.prepare(`
+  INSERT INTO pets (owner, kind, name) VALUES (?, ?, ?)
+  ON CONFLICT (owner) DO UPDATE SET kind = excluded.kind, name = excluded.name
+`);
+
+export function getPetState(owner: string): PetState {
+  const credit = (creditStmt.get(owner) as unknown as { credit: number } | undefined)?.credit ?? 0;
+  const row = petStmt.get(owner) as unknown as Pet | undefined;
+  return { unlocked: petUnlocked(credit), pet: row ? { kind: row.kind, name: row.name } : null };
+}
+
+// Adopts a pet, or renames or changes the one you have. The caller has checked that the
+// kind and name are valid and that a pet is unlocked.
+export function setPet(owner: string, kind: PetKind, name: string): { ok: true } | { ok: false; reason: "too-many-gardeners" } {
+  if (!petStmt.get(owner)) {
+    const { n } = petCountStmt.get() as unknown as { n: number };
+    if (n >= MAX_PET_KEEPERS) return { ok: false, reason: "too-many-gardeners" };
+  }
+  setPetStmt.run(owner, kind, name);
+  return { ok: true };
 }
 
 // Puts a decoration on a spot, or clears the spot with null. The caller has checked

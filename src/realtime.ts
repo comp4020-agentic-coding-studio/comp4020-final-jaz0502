@@ -3,6 +3,7 @@ import { type Activity, recentActivity } from "./activity.ts";
 import type { GardenerStats, Seeds } from "./db.ts";
 import type { DecorationState } from "./decorations.ts";
 import { logEvent } from "./log.ts";
+import { type PetState } from "./pets.ts";
 import { type Gardener, connect, disconnect, listGardeners } from "./presence.ts";
 import type { PlantType, Plot, PlotState } from "./types.ts";
 
@@ -20,6 +21,8 @@ export interface Hello {
   // The decorations there are, in the order they are unlocked, so the page never keeps
   // its own copy of the list.
   decorations: { id: string; name: string; kind: "fence" | "prop" }[];
+  // The kinds of pet there are, so the page keeps no copy of the list.
+  pets: string[];
 }
 
 type SseEvent =
@@ -44,6 +47,9 @@ type SseEvent =
   // The decorations you have unlocked, how many waterings until the next, and what you
   // have put where. Sent to your own streams only, never broadcast.
   | { type: "decorations"; decorations: DecorationState }
+  // Whether a pet is waiting for you and the one you have. Sent to your own streams only,
+  // and its name goes nowhere else.
+  | { type: "pet"; pet: PetState }
   | { type: "own-garden"; plots: Plot[] }
   | { type: "own-update"; plot: Plot }
   // What gardeners have just done: the short recent list once on connect, then each
@@ -93,6 +99,8 @@ function payloadOf(event: SseEvent): unknown {
       return event.seeds;
     case "decorations":
       return event.decorations;
+    case "pet":
+      return event.pet;
     case "own-garden":
       return event.plots;
     case "own-update":
@@ -126,6 +134,7 @@ export function subscribe(
   seeds: Seeds,
   ownPlots: Plot[],
   decorations: DecorationState,
+  pet: PetState,
 ): void {
   res.writeHead(200, {
     "content-type": "text/event-stream",
@@ -151,6 +160,7 @@ export function subscribe(
   write(res, { type: "stats", stats });
   write(res, { type: "seeds", seeds });
   write(res, { type: "decorations", decorations });
+  write(res, { type: "pet", pet });
   write(res, { type: "own-garden", plots: ownPlots });
   for (const plot of ownPlots) ownKnownState.set(`${gardenerId}:${plot.position}`, plot.state);
   write(res, { type: "feed", feed: recentActivity() });
@@ -194,6 +204,13 @@ export function sendSeeds(gardenerId: string, seeds: Seeds): void {
 export function sendDecorations(gardenerId: string, decorations: DecorationState): void {
   for (const [res, id] of gardenerOf) {
     if (id === gardenerId) write(res, { type: "decorations", decorations });
+  }
+}
+
+// Send a gardener their pet, to their own streams and no one else's.
+export function sendPet(gardenerId: string, pet: PetState): void {
+  for (const [res, id] of gardenerOf) {
+    if (id === gardenerId) write(res, { type: "pet", pet });
   }
 }
 

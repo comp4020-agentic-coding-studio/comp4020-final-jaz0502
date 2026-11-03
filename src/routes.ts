@@ -8,8 +8,9 @@ import { allowAction, mayPlant, recordPlanting } from "./limits.ts";
 import { logEvent } from "./log.ts";
 import { renderPage } from "./page.ts";
 import { move as moveGardener, wave as waveGardener } from "./presence.ts";
+import { PET_KINDS, petKindOf, validPetName } from "./pets.ts";
 import { renderReadme } from "./readme.ts";
-import { broadcastActivity, broadcastPresenceUpdate, broadcastUpdate, broadcastWave, sendDecorations, sendOwnUpdate, sendSeeds, sendStats, subscribe } from "./realtime.ts";
+import { broadcastActivity, broadcastPresenceUpdate, broadcastUpdate, broadcastWave, sendDecorations, sendOwnUpdate, sendPet, sendSeeds, sendStats, subscribe } from "./realtime.ts";
 import { serveStatic } from "./static.ts";
 import type { PlantType, Plot } from "./types.ts";
 
@@ -114,6 +115,15 @@ const DECORATE_REFUSALS: Record<string, string> = {
   "bad-spot": "That spot is not for this decoration.",
   locked: "You haven't unlocked that decoration yet.",
 };
+// Adopting a pet, or renaming it. Like decorating, it is only for your own garden.
+const PET_PATH = "/api/own-garden/pet";
+
+const PET_REFUSALS: Record<string, string> = {
+  "bad-kind": "There is no such pet.",
+  "bad-name": "A name is 1 to 12 letters or digits, with no spaces or other marks.",
+  locked: "You haven't unlocked a pet yet.",
+  "too-many-gardeners": "The garden can't keep any more pets just now.",
+};
 // Your own garden. There is no way to name anyone else's: whose garden it is comes
 // from the cookie alone.
 const OWN_PATTERN = /^\/api\/own-garden\/(\d+)\/(plant|water|compost)$/;
@@ -197,12 +207,14 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
         serverNow: Date.now(),
         beds: BEDS.map(({ name, takes }) => ({ name, takes })),
         decorations: DECORATIONS.map(({ id, name, kind }) => ({ id, name, kind })),
+        pets: [...PET_KINDS],
       },
       publicId(identity),
       db.getStats(publicId(identity)),
       db.getSeeds(publicId(identity)),
       ownPlotsNow(publicId(identity)),
       db.getDecorations(publicId(identity)),
+      db.getPetState(publicId(identity)),
     );
     return;
   }
@@ -334,6 +346,45 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
 
     const state = db.getDecorations(who);
     sendDecorations(who, state);
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(state));
+    return;
+  }
+
+  // Adopting a pet or giving it a name. It only changes your own pet: only you are told,
+  // it counts against the same limit, and one you haven't unlocked is turned away. The name
+  // is stranger-typed text, so it is checked on the server and never written to the log.
+  if (req.method === "POST" && pathname === PET_PATH) {
+    const who = publicId(identity);
+    const limit = allowAction(who, Date.now());
+    if (!limit.ok) {
+      if (limit.firstRefusal) logEvent(who, "pet", { result: "refused", reason: "rate-limited" });
+      res.writeHead(429, {
+        "content-type": "application/json",
+        "retry-after": String(Math.max(1, Math.ceil(limit.retryAfterMs / 1000))),
+      });
+      res.end(JSON.stringify({ error: "Slow down: too many actions, try again in a few seconds" }));
+      return;
+    }
+
+    const refuse = (status: number, reason: string, fields: Record<string, string> = {}) => {
+      logEvent(who, "pet", { ...fields, result: "refused", reason });
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: PET_REFUSALS[reason] ?? "Not possible." }));
+    };
+
+    const body = await readJsonBody(req);
+    const asked = typeof body === "object" && body !== null ? (body as { kind?: unknown; name?: unknown }) : {};
+    const kind = petKindOf(asked.kind);
+    if (!kind) return refuse(400, "bad-kind");
+    if (!validPetName(asked.name)) return refuse(400, "bad-name", { kind });
+    if (!db.getPetState(who).unlocked) return refuse(409, "locked", { kind });
+    const kept = db.setPet(who, kind, asked.name);
+    if (!kept.ok) return refuse(409, kept.reason, { kind });
+
+    logEvent(who, "pet", { kind, result: "ok" });
+    const state = db.getPetState(who);
+    sendPet(who, state);
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify(state));
     return;
@@ -492,10 +543,17 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
       // Looking after the shared garden earns decorations for your own, privately.
       if (countsTowardsDecoration) {
         const before = db.getDecorations(who).unlocked.length;
+        const hadPet = db.getPetState(who).unlocked;
         if (db.creditWatering(who)) {
           const state = db.getDecorations(who);
           if (state.unlocked.length > before) logEvent(who, "unlock", { decoration: DECORATIONS[before].id });
           sendDecorations(who, state);
+          // The last decoration brings a pet with it.
+          const pet = db.getPetState(who);
+          if (pet.unlocked && !hadPet) {
+            logEvent(who, "unlock", { reward: "pet" });
+            sendPet(who, pet);
+          }
         }
       }
 

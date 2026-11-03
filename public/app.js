@@ -3874,6 +3874,22 @@ function cowUnderPointer() {
   return cow ? { cow, distance: hit.distance } : null;
 }
 
+// The hen the pointer is over, with how far away it is, using the ray already set up. A hen
+// is small, so it is a generous ball round her rather than her exact shape.
+const HEN_REACH = 0.32;
+function henUnderPointer() {
+  let best = null;
+  const point = new THREE.Vector3();
+  const centre = new THREE.Vector3();
+  for (const hen of hens) {
+    centre.set(hen.group.position.x, GROUND_Y + 0.25, hen.group.position.z);
+    if (!raycaster.ray.intersectSphere(new THREE.Sphere(centre, HEN_REACH), point)) continue;
+    const distance = point.distanceTo(raycaster.ray.origin);
+    if (!best || distance < best.distance) best = { hen, distance };
+  }
+  return best;
+}
+
 // When the server last told this browser to slow down, until when to hold off.
 let actionsPausedUntil = 0;
 const SLOW_DOWN_MESSAGE = "Slow down: too many actions, try again in a few seconds";
@@ -3887,6 +3903,12 @@ async function handlePointerClick(event) {
   const hit = raycaster.intersectObjects(soilMeshes, false)[0];
   // A cow in front of whatever is behind it gets some hay, and nothing else happens.
   const cow = cowUnderPointer();
+  const hen = henUnderPointer();
+  // A hen in front of everything else gets a stroke, and nothing else happens.
+  if (hen && (!hit || hen.distance < hit.distance) && (!cow || hen.distance < cow.distance)) {
+    petHen(hen.hen);
+    return;
+  }
   if (cow && (!hit || cow.distance < hit.distance)) {
     feedCow(cow.cow);
     return;
@@ -4088,7 +4110,9 @@ renderer.domElement.addEventListener("pointermove", (event) => {
   let position = hit ? hit.object.userData.position : null;
   // A cow can be given hay, so the pointer says so over one.
   const overCow = cowUnderPointer();
-  renderer.domElement.style.cursor = overCow && (!hit || overCow.distance < hit.distance) ? "pointer" : "";
+  const overHen = henUnderPointer();
+  renderer.domElement.style.cursor =
+    (overCow && (!hit || overCow.distance < hit.distance)) || (overHen && (!hit || overHen.distance < hit.distance)) ? "pointer" : "";
 
   // Over the other bed, or the grass and path round it: offer to go there.
   let otherBed = null;
@@ -5374,7 +5398,48 @@ function updateHens(timeSeconds) {
     hen.head.position.x = 0.18 + (walking ? Math.sin(timeSeconds * 14 + i * 2) * 0.02 : 0);
     hen.head.rotation.z = -1.1 * peck;
     hen.tail.rotation.z = 0.5 + Math.sin(timeSeconds * 2 + i) * 0.05;
+    if (hen.pet) updatePet(hen);
+    else if (hen.body.scale.x !== 1) hen.body.scale.setScalar(1);
   });
+}
+
+// Petting a hen: click one and she puffs up, hops a little and a heart floats up. Like
+// feeding a cow, this is a way of looking and nothing more: it is only in your own page,
+// sends nothing to the server, is never stored or counted, and the hen keeps to her usual
+// round underneath. Someone else's hen is not touched on their screen.
+const PET_S = 2.2;
+function petHen(hen) {
+  if (hen.pet) return; // already being stroked: a second click does nothing
+  const heart = new THREE.Sprite(new THREE.SpriteMaterial({ map: getHeartTexture(), transparent: true, depthWrite: false }));
+  heart.scale.set(0.3, 0.3, 1);
+  heart.visible = false;
+  scene.add(heart);
+  hen.pet = { start: performance.now() / 1000, heart };
+  showStatusMessage("You stroked the hen");
+}
+
+// Layered on top of the hen's usual motion, so it runs after it each frame.
+function updatePet(hen) {
+  const t = performance.now() / 1000 - hen.pet.start;
+  const heart = hen.pet.heart;
+  if (t >= PET_S) {
+    scene.remove(heart);
+    heart.material.dispose();
+    hen.pet = null;
+    return;
+  }
+  const settle = 1 - smooth(clamp01((t - 0.2) / 1.6));
+  if (!stillMotion.matches) {
+    hen.body.position.y += Math.abs(Math.sin(t * 9)) * 0.035 * settle;
+    hen.tail.rotation.z += Math.sin(t * 22) * 0.12 * settle;
+  }
+  // Chest out and head up, then back down.
+  hen.head.rotation.z = -0.25 * settle;
+  hen.body.scale.setScalar(1 + 0.12 * Math.sin(Math.PI * clamp01(t / 0.7)));
+  const h = clamp01(t / PET_S);
+  heart.visible = true;
+  heart.position.set(hen.group.position.x, GROUND_Y + 0.55 + h * 0.5, hen.group.position.z);
+  heart.material.opacity = 1 - h * h;
 }
 
 // A barn for the cows, out on the lawn between two of their patches, facing the garden:
