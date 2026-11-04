@@ -150,7 +150,23 @@ export function renderPage(): string {
       <!-- In your own garden only: the decorations you have unlocked, to put out or take away. -->
       <div id="own-decor" class="own-seeds" hidden>
         <h3 class="paper-heading">Decorations</h3>
+        <p id="decor-locked" class="locked-note" hidden><svg class="lock-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 11V8a5 5 0 0 1 10 0v3"/><rect x="5" y="11" width="14" height="9" rx="2"/><circle cx="12" cy="15.5" r="1.2"/></svg><span>Locked. Water plants in the shared garden to unlock decorations for your garden.</span></p>
         <div id="decor-picker" role="group" aria-label="Decorations for your garden"></div>
+      </div>
+      <!-- In your own garden only, once a pet has been unlocked: choose a kind, give it a name, feed it. -->
+      <div id="own-pet" class="own-seeds" hidden>
+        <h3 class="paper-heading">Your pet</h3>
+        <p id="pet-locked" class="locked-note" hidden><svg class="lock-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 11V8a5 5 0 0 1 10 0v3"/><rect x="5" y="11" width="14" height="9" rx="2"/><circle cx="12" cy="15.5" r="1.2"/></svg><span>Locked. A pet comes after your last decoration.</span></p>
+        <form id="pet-form" autocomplete="off" novalidate>
+          <div id="pet-kinds" role="radiogroup" aria-label="Kind of pet"></div>
+          <label class="pet-name-label" for="pet-name">Name</label>
+          <input id="pet-name" type="text" maxlength="12" inputmode="text" autocapitalize="words" spellcheck="false" placeholder="1 to 12 letters or digits" />
+          <div class="pet-actions">
+            <button type="submit" id="pet-save">Keep</button>
+            <button type="button" id="pet-feed" hidden>Feed</button>
+          </div>
+        </form>
+        <p id="pet-note" class="own-note" role="status"></p>
       </div>
       <h3 class="paper-heading">My record</h3>
       <!-- A plain record, private to you: one line, no tiles, totals or goals. -->
@@ -221,7 +237,6 @@ export function renderPage(): string {
   <div id="quick-actions">
     <button type="button" id="quick-camera" class="quick-action" aria-label="Take a photo of the garden"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 8h3l1.6-2.2h6.8L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.2" r="3.6"/></svg></button>
     <button type="button" id="quick-bag" class="quick-action" aria-expanded="false" aria-controls="bag" aria-label="Open your bag of seeds"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/><path d="M6.2 8h11.6l1.4 12H4.8z"/><path d="M9.5 12.5c.6.9 1.4 1.3 2.5 1.3s1.9-.4 2.5-1.3"/></svg></button>
-    <button type="button" id="quick-own" class="quick-action" aria-label="Visit your own garden, which only you can see"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 21v-8"/><path d="M12 13c0-3.5 2.5-6 6.5-6 0 3.8-2.6 6-6.5 6z"/><path d="M12 15c0-3-2.2-5.2-5.6-5.2 0 3.3 2.3 5.2 5.6 5.2z"/><path d="M5 21h14"/></svg></button>
     <button type="button" id="quick-wave" class="quick-action" aria-label="Wave hello to everyone in the garden"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 13V6.5a1.5 1.5 0 0 1 3 0V12"/><path d="M11 11V5a1.5 1.5 0 0 1 3 0v6"/><path d="M14 11V6.5a1.5 1.5 0 0 1 3 0V14c0 4-2.6 6.5-6.2 6.5-2.6 0-4.2-1.4-5.4-3.4L3.8 14.3a1.4 1.4 0 0 1 2.3-1.5L8 15"/><path d="M19.5 4.5c.9.7 1.5 1.7 1.6 2.8"/></svg></button>
   </div>
 
@@ -232,6 +247,16 @@ export function renderPage(): string {
       <button type="button" id="own-back">Back<span class="own-back-long"> to the shared garden</span></button>
     </div>
     <p class="own-note">Only you can see it. Plant your seeds and look after them.</p>
+  </div>
+
+  <!-- Said once, in the middle of the screen, when a pet has been unlocked. Only you see it. -->
+  <div id="unlock-toast" class="paper" role="status" aria-live="polite" hidden>
+    <h2 id="toast-title" class="paper-title"></h2>
+    <p id="toast-body"></p>
+    <div class="toast-actions">
+      <button type="button" id="toast-go">Visit my garden</button>
+      <button type="button" id="toast-close">Got it</button>
+    </div>
   </div>
 
   <!-- Your bag: the seeds you have gathered, as packets. Only you ever see it. -->

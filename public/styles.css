@@ -557,17 +557,55 @@ body {
   transform: rotate(1.4deg);
 }
 
-/* On a phone the journal starts closed, so Camera and Wave also float in the
-   corner, always in reach. They are not shown on a wider screen. */
+/* Camera, Bag, My garden and Wave float in the bottom right corner on every screen, always
+   in reach, with a label on hover or focus. The journal no longer repeats them. */
 #quick-actions {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.you-actions {
   display: none;
+}
+
+.quick-action {
+  position: relative;
+}
+
+.quick-action::after {
+  content: attr(aria-label);
+  position: absolute;
+  right: calc(100% + 0.6rem);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 0.3rem 0.6rem;
+  border-radius: 0.4rem;
+  background: rgba(30, 42, 28, 0.92);
+  color: #fffaf0;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+@media (hover: hover) {
+  .quick-action:hover::after,
+  .quick-action:focus-visible::after {
+    opacity: 1;
+  }
 }
 
 .quick-action {
   display: grid;
   place-items: center;
-  width: 3rem;
-  height: 3rem;
+  width: 3.75rem;
+  height: 3.75rem;
   padding: 0;
   border: 1px solid #4a6638;
   border-radius: 50%;
@@ -578,8 +616,8 @@ body {
 }
 
 .quick-action .action-icon {
-  width: 1.45rem;
-  height: 1.45rem;
+  width: 1.9rem;
+  height: 1.9rem;
 }
 
 .quick-action:disabled {
@@ -887,6 +925,130 @@ body {
   color: #5e4a2c;
 }
 
+/* Something in your journal that you have not unlocked yet: dimmed, with a padlock. It says
+   only that it is locked, never how many more there are. */
+.locked-note {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.3rem 0 0.2rem;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.85rem;
+  font-style: italic;
+  line-height: 1.3;
+  color: #6a5a40;
+  background: rgba(120, 95, 55, 0.1);
+  border: 1px dashed #a98a55;
+  border-radius: 8px;
+}
+
+.locked-note[hidden] {
+  display: none;
+}
+
+.lock-icon {
+  flex: none;
+  width: 1.3rem;
+  height: 1.3rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.own-seeds.locked .paper-heading {
+  opacity: 0.6;
+}
+
+/* Said in the middle of the screen when something has been unlocked. */
+#unlock-toast {
+  position: fixed;
+  z-index: 5;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) rotate(-0.4deg);
+  width: min(24rem, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: 0.8rem 1.1rem 1rem;
+  color: #3b2c1a;
+  background-color: #ebdcb2;
+  border: 1px solid #a98a55;
+  border-radius: 5px 13px 7px 15px / 13px 6px 15px 5px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4), inset 0 0 26px rgba(150, 100, 40, 0.38);
+}
+
+#unlock-toast[hidden] {
+  display: none;
+}
+
+#unlock-toast p {
+  margin: 0.4rem 0 0.7rem;
+  line-height: 1.35;
+}
+
+.toast-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+#unlock-toast button {
+  padding: 0.25rem 0.8rem;
+  font-family: "Caveat", cursive;
+  font-size: 1.2rem;
+  line-height: 1.1;
+  color: #3b2c1a;
+  background: #f6ecd0;
+  border: 1px solid #a98a55;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+#unlock-toast #toast-go {
+  color: #fff;
+  background: #4a6a35;
+  border-color: #2f4721;
+}
+
+body.photo-mode #unlock-toast {
+  display: none;
+}
+
+/* Your pet: a kind, a name and a feed button, in the journal and only in your own garden. */
+#pet-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.3rem;
+}
+
+.pet-name-label {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: #5e4a2c;
+}
+
+#pet-name {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 0.2rem;
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+}
+
+.pet-actions {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+}
+
+#pet-note {
+  margin: 0.3rem 0 0;
+  min-height: 1.1em;
+}
+
 /* How many more waterings until the next decoration: one quiet line under your record. */
 .decor-next {
   margin: 0.15rem 0 0.5rem;
@@ -921,7 +1083,9 @@ body.own-mode .own-seeds {
 }
 
 #own-picker button,
-#decor-picker button {
+#decor-picker button,
+#pet-kinds button,
+.pet-actions button {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
@@ -940,12 +1104,17 @@ body.own-mode .own-seeds {
 #own-picker button:hover,
 #own-picker button:focus-visible,
 #decor-picker button:hover,
-#decor-picker button:focus-visible {
+#decor-picker button:focus-visible,
+#pet-kinds button:hover,
+#pet-kinds button:focus-visible,
+.pet-actions button:hover,
+.pet-actions button:focus-visible {
   background: #fff6dc;
 }
 
 #own-picker button[aria-checked="true"],
-#decor-picker button[aria-pressed="true"] {
+#decor-picker button[aria-pressed="true"],
+#pet-kinds button[aria-checked="true"] {
   color: #fff;
   background: #4a6a35;
   border-color: #2f4721;

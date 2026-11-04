@@ -2985,7 +2985,7 @@ const ownBar = document.getElementById("own-bar");
 const ownSeedLine = document.getElementById("own-seed");
 const ownPicker = document.getElementById("own-picker");
 const ownSign = document.getElementById("own-sign");
-const ownButtons = [ownSign, document.getElementById("quick-own")];
+const ownButtons = [ownSign];
 
 // The button that takes you to your garden takes you back to the shared one while you
 // are there, and says so.
@@ -3069,7 +3069,15 @@ function clearOwnHover() {
 function ownPointerMove(event) {
   raycaster.setFromCamera(ndcFromEvent(event), camera);
   const hit = raycaster.intersectObjects(ownSoilMeshes, false)[0];
-  const position = hit ? hit.object.userData.ownPosition : null;
+  const overPet = petUnderPointer();
+  const petFirst = overPet && (!hit || overPet.distance < hit.distance);
+  const position = hit && !petFirst ? hit.object.userData.ownPosition : null;
+  if (petFirst) {
+    clearOwnHover();
+    hoveredOwn = null;
+    renderer.domElement.style.cursor = "pointer";
+    return;
+  }
   if (position === hoveredOwn) return;
   clearOwnHover();
   hoveredOwn = position;
@@ -3085,6 +3093,12 @@ function ownPointerMove(event) {
 async function ownClick(event) {
   raycaster.setFromCamera(ndcFromEvent(event), camera);
   const hit = raycaster.intersectObjects(ownSoilMeshes, false)[0];
+  // Your pet in front of whatever is behind it gets a stroke, and nothing else happens.
+  const pet = petUnderPointer();
+  if (pet && (!hit || pet.distance < hit.distance)) {
+    strokePet();
+    return;
+  }
   if (!hit) return;
   const position = hit.object.userData.ownPosition;
   const state = ownPlots.get(position)?.state ?? "empty";
@@ -3605,7 +3619,10 @@ function refreshDecorJournal() {
   const fences = unlocked.filter((d) => d.kind === "fence");
   const props = unlocked.filter((d) => d.kind !== "fence");
   const have = [...(fences.length > 0 ? [{ id: "hedge", name: "Shrub hedge", kind: "fence" }] : []), ...fences, ...props];
-  decorBox.hidden = have.length === 0;
+  decorBox.hidden = false;
+  decorBox.classList.toggle("locked", have.length === 0);
+  document.getElementById("decor-locked").hidden = have.length > 0;
+  decorPicker.hidden = have.length === 0;
   decorPicker.replaceChildren(
     ...have.map((decoration) => {
       const button = document.createElement("button");
@@ -3622,6 +3639,16 @@ function refreshDecorJournal() {
 }
 
 function renderDecorations(state) {
+  // Say so, in the middle of the screen, whenever a new decoration has unlocked. What this
+  // browser has already been told about is kept in this browser only.
+  const told = decorTold();
+  if (told !== null && state.unlocked.length > told) {
+    const newest = decorationList.find((d) => d.id === state.unlocked[state.unlocked.length - 1]);
+    if (newest) {
+      pushToast("decoration", `You've unlocked the ${newest.name}!`, `Find it in your journal ${toastWhere()}, under Decorations, while you are in My garden.`);
+    }
+  }
+  rememberDecorTold(state.unlocked.length);
   ownDecor.unlocked = state.unlocked;
   ownDecor.nextIn = state.nextIn;
   ownDecor.placed = state.placed;
@@ -3791,6 +3818,7 @@ function connect() {
     clockOffset = hello.serverNow - Date.now();
     if (Array.isArray(hello.beds) && hello.beds.length === BEDS) beds = hello.beds;
     if (Array.isArray(hello.decorations)) decorationList = hello.decorations;
+    if (Array.isArray(hello.pets)) petKinds = hello.pets;
     renderBedSigns();
     renderBedHere();
     renderYou();
@@ -3814,6 +3842,7 @@ function connect() {
   source.addEventListener("stats", (event) => renderStats(JSON.parse(event.data)));
   source.addEventListener("seeds", (event) => renderSeeds(JSON.parse(event.data)));
   source.addEventListener("decorations", (event) => renderDecorations(JSON.parse(event.data)));
+  source.addEventListener("pet", (event) => renderPet(JSON.parse(event.data)));
   source.addEventListener("own-garden", (event) => {
     for (const plot of JSON.parse(event.data)) applyOwnPlot(plot);
   });
@@ -5442,6 +5471,799 @@ function updatePet(hen) {
   heart.material.opacity = 1 - h * h;
 }
 
+// Your pet: the reward after the last decoration, only ever drawn in your own garden and
+// only ever from your own `pet` event, so nobody else sees it or its name. The kind and the
+// name are the server's; the page only draws them. It wanders along the front and right of
+// your bed (clear of the props), and you can stroke it or feed it. Both are a way of looking
+// and nothing more, like the hens and cows: nothing is sent, stored, counted or logged.
+let petKinds = [];
+let petState = { unlocked: false, pet: null };
+let petObj = null; // the drawn pet: { kind, group, body, head, tail, legs, tag, ... }
+
+const PET_COLOURS = {
+  cat: { coat: 0xd98e4a, mark: 0xa8602a, pale: 0xf6ecdc, nose: 0xe8a0a8, eye: 0x86bf3c },
+  dog: { coat: 0xb9814a, mark: 0x6a4326, pale: 0xf0e2c8, nose: 0x2a1f1a, eye: 0x3a2a1c },
+  rabbit: { coat: 0xa89888, mark: 0x6b5d50, pale: 0xf5f0e6, nose: 0xe8a0a8, eye: 0x1c1613 },
+};
+// How big each is drawn, and how long its legs are (so its paws meet the ground).
+const PET_SIZE = { cat: { scale: 1.25, baseY: 0.215 }, dog: { scale: 1.2, baseY: 0.273 }, rabbit: { scale: 1.45, baseY: 0.15 } };
+// The path it walks: along the front edge of the bed, then up the right one, in bed-local x,z.
+const PET_PATH = [[-1.8, 2.9], [2.9, 2.9], [2.9, -1.8]];
+const PET_PATH_LENGTH = 4.7 + 4.7;
+const PET_SPEED = 0.45;
+
+function petPathPoint(distance) {
+  const d = Math.min(Math.max(distance, 0), PET_PATH_LENGTH);
+  if (d <= 4.7) return [PET_PATH[0][0] + d, PET_PATH[0][1]];
+  return [PET_PATH[1][0], PET_PATH[1][1] - (d - 4.7)];
+}
+
+function buildPetModel(kind) {
+  const c = PET_COLOURS[kind];
+  const coat = flatMaterial(c.coat);
+  const mark = flatMaterial(c.mark);
+  const pale = flatMaterial(c.pale);
+  const nose = flatMaterial(c.nose);
+  const iris = flatMaterial(c.eye);
+  const black = flatMaterial(0x16110e);
+  const cat = kind === "cat";
+  const dog = kind === "dog";
+  const rabbit = kind === "rabbit";
+  const group = new THREE.Group();
+  const body = new THREE.Group();
+  group.add(body);
+  const put = (parent, rx, ry, rz, material, x = 0, y = 0, z = 0) => {
+    const mesh = cowBlob(rx, ry, rz, material, x, y, z);
+    parent.add(mesh);
+    return mesh;
+  };
+  const eyes = [];
+  const eye = (parent, material, rx, ry, rz, x, y, z) => {
+    const mesh = put(parent, rx, ry, rz, material, x, y, z);
+    eyes.push({ mesh, sy: ry });
+    return mesh;
+  };
+  const whiskers = (parent, x, y, spread) => {
+    for (const side of [1, -1]) {
+      for (const [i, lift] of [-0.012, 0, 0.012].entries()) {
+        const w = put(parent, 0.004, 0.0015, 0.055, pale, x, y + lift, side * spread);
+        w.rotation.y = side * (0.35 + i * 0.2);
+      }
+    }
+  };
+
+  // The body, built from a few overlapping lumps so it has a chest, a waist and hips.
+  if (cat) {
+    put(body, 0.115, 0.1, 0.082, coat, 0.09, 0, 0);
+    put(body, 0.13, 0.088, 0.078, coat, 0, -0.005, 0);
+    put(body, 0.12, 0.1, 0.088, coat, -0.1, 0.005, 0);
+    put(body, 0.06, 0.06, 0.05, pale, 0.15, -0.03, 0); // white bib
+    for (const x of [0.07, 0.0, -0.07, -0.13]) put(body, 0.014, 0.022, 0.062, mark, x, 0.088, 0); // tabby stripes
+  } else if (dog) {
+    put(body, 0.17, 0.15, 0.11, coat, 0.13, 0, 0);
+    put(body, 0.17, 0.12, 0.1, coat, 0, -0.01, 0);
+    put(body, 0.16, 0.13, 0.105, coat, -0.14, 0.005, 0);
+    put(body, 0.1, 0.09, 0.085, pale, 0.19, -0.05, 0); // pale chest
+    put(body, 0.13, 0.05, 0.1, mark, -0.03, 0.095, 0); // dark saddle
+  } else {
+    put(body, 0.15, 0.115, 0.1, coat, 0, 0, 0);
+    put(body, 0.11, 0.12, 0.1, coat, -0.06, 0.02, 0);
+    put(body, 0.08, 0.09, 0.075, coat, 0.1, -0.01, 0);
+    for (const side of [1, -1]) put(body, 0.085, 0.1, 0.045, coat, -0.07, -0.02, side * 0.085); // haunches
+    put(body, 0.1, 0.045, 0.07, pale, 0.02, -0.075, 0); // pale belly
+  }
+
+  // The head hangs from a pivot at the base of the neck, so it can turn, nod and lower.
+  // The neck bends from the shoulders, and the head from the top of the neck, so a pet can
+  // lower its whole front to reach the ground.
+  const neckAt = cat ? [0.12, 0.04] : dog ? [0.2, 0.08] : [0.1, 0.05];
+  const headAt = [cat ? 0.17 : dog ? 0.27 : 0.16, cat ? 0.075 : dog ? 0.14 : 0.09];
+  const neck = new THREE.Group();
+  neck.position.set(neckAt[0], neckAt[1], 0);
+  body.add(neck);
+  put(neck, cat ? 0.055 : dog ? 0.08 : 0.05, cat ? 0.065 : dog ? 0.09 : 0.05, cat ? 0.055 : dog ? 0.075 : 0.05, coat, (cat ? 0.15 : dog ? 0.22 : 0.14) - neckAt[0], (cat ? 0.05 : dog ? 0.09 : 0.06) - neckAt[1], 0);
+  const head = new THREE.Group();
+  head.position.set(headAt[0] - neckAt[0], headAt[1] - neckAt[1], 0);
+  neck.add(head);
+  const ears = [];
+  const ear = (side, tx, ty, rx, ry, rz, material, tilt) => {
+    const pivot = new THREE.Group();
+    pivot.position.set(tx, ty, side * (cat ? 0.045 : dog ? 0.06 : 0.03));
+    put(pivot, rx, ry, rz, material, 0, ry * 0.85, 0);
+    pivot.userData = { baseX: side * tilt.x, baseZ: tilt.z, side };
+    pivot.rotation.set(pivot.userData.baseX, 0, pivot.userData.baseZ);
+    head.add(pivot);
+    ears.push(pivot);
+    return pivot;
+  };
+  let noseMesh = null;
+  if (cat) {
+    put(head, 0.075, 0.07, 0.075, coat, 0.045, 0.045, 0);
+    put(head, 0.032, 0.022, 0.04, pale, 0.1, 0.025, 0); // muzzle
+    noseMesh = put(head, 0.011, 0.008, 0.014, nose, 0.128, 0.04, 0);
+    for (const side of [1, -1]) {
+      const e = ear(side, 0.025, 0.085, 0.018, 0.05, 0.034, coat, { x: 0.25, z: -0.1 });
+      put(e, 0.008, 0.032, 0.022, nose, 0.008, 0.04, 0); // pink inside
+      eye(head, iris, 0.009, 0.017, 0.016, 0.098, 0.065, side * 0.04);
+      put(head, 0.005, 0.015, 0.007, black, 0.106, 0.065, side * 0.04); // slit pupil
+    }
+    whiskers(head, 0.115, 0.03, 0.04);
+    put(head, 0.012, 0.03, 0.03, mark, 0.04, 0.105, 0); // forehead stripe
+  } else if (dog) {
+    put(head, 0.09, 0.085, 0.08, coat, 0.04, 0.05, 0);
+    put(head, 0.075, 0.042, 0.048, pale, 0.135, 0.02, 0); // snout
+    put(head, 0.03, 0.012, 0.03, pale, 0.15, -0.01, 0); // chin
+    noseMesh = put(head, 0.016, 0.014, 0.022, nose, 0.205, 0.04, 0);
+    put(head, 0.035, 0.005, 0.022, nose, 0.14, -0.012, 0).scale.set(0.035, 0.007, 0.022); // mouth line
+    for (const side of [1, -1]) {
+      ear(side, 0.0, 0.09, 0.028, 0.06, 0.018, mark, { x: 0.35, z: 3.1 }).children[0].position.set(0, -0.045, 0); // floppy
+      eye(head, black, 0.011, 0.014, 0.011, 0.098, 0.075, side * 0.045);
+      put(head, 0.03, 0.008, 0.012, mark, 0.09, 0.098, side * 0.045); // brows
+    }
+    const tongue = put(head, 0.02, 0.006, 0.014, nose, 0.15, -0.015, 0);
+    tongue.visible = false;
+    head.userData.tongue = tongue;
+  } else {
+    put(head, 0.075, 0.068, 0.062, coat, 0.04, 0.03, 0);
+    for (const side of [1, -1]) {
+      put(head, 0.035, 0.032, 0.03, pale, 0.075, 0.0, side * 0.035); // cheeks
+      const e = ear(side, -0.01, 0.085, 0.018, 0.13, 0.03, coat, { x: 0.12, z: -0.3 });
+      put(e, 0.008, 0.08, 0.02, nose, 0.006, 0.0, 0); // pink inside
+      put(e, 0.02, 0.025, 0.032, mark, 0, 0.26, 0); // dark tips
+      eye(head, black, 0.013, 0.017, 0.009, 0.075, 0.055, side * 0.058);
+      put(head, 0.004, 0.005, 0.003, flatMaterial(0xffffff), 0.082, 0.062, side * 0.063);
+    }
+    noseMesh = put(head, 0.012, 0.01, 0.014, nose, 0.112, 0.04, 0);
+    whiskers(head, 0.105, 0.02, 0.03);
+  }
+
+  // The tail: a few joints in a chain for a cat's, which lets it curl, a dog's that wags,
+  // and a rabbit's small puff.
+  const tails = [];
+  if (!rabbit) {
+    const joints = cat ? 3 : 2;
+    const size = cat ? { rx: 0.05, r: 0.02, step: 0.09 } : { rx: 0.06, r: 0.026, step: 0.11 };
+    let parent = body;
+    for (let i = 0; i < joints; i++) {
+      const joint = new THREE.Group();
+      joint.position.set(i === 0 ? (cat ? -0.2 : -0.28) : -size.step, i === 0 ? 0.04 : 0, 0);
+      put(joint, size.rx, size.r, size.r, i === joints - 1 && cat ? mark : coat, -size.step / 2, 0, 0);
+      parent.add(joint);
+      tails.push(joint);
+      parent = joint;
+    }
+    tails[0].userData.rest = cat ? -1.1 : -0.8;
+    tails[1].userData.rest = cat ? 0.45 : 0.5;
+    if (cat) tails[2].userData.rest = 0.5;
+  } else {
+    put(body, 0.05, 0.05, 0.05, pale, -0.16, 0.04, 0);
+  }
+
+  // Four legs hung from their hips, front pair first: front left, front right, back left,
+  // back right. Walkers swing them in diagonal pairs and a rabbit's tuck up as it hops.
+  const legs = [];
+  const leg = (x, z, len, w, hind) => {
+    const g = new THREE.Group();
+    g.position.set(x, -0.03, z);
+    if (rabbit) {
+      if (hind) {
+        put(g, 0.075, 0.016, 0.022, coat, 0.045, -0.1, 0); // the long hind foot
+      } else {
+        put(g, 0.013, len * 0.5, 0.013, coat, 0, -len * 0.5, 0);
+        put(g, 0.025, 0.014, 0.02, pale, 0.01, -len * 0.97, 0);
+      }
+    } else {
+      put(g, w * 1.25, len * 0.3, w * 1.05, coat, 0, -len * 0.22, 0); // thigh
+      put(g, w * 0.7, len * 0.4, w * 0.7, coat, 0, -len * 0.62, 0); // shin
+      put(g, w * 1.4, 0.02, w * 1.15, hind && dog ? coat : pale, w * 0.55, -len * 0.97, 0); // paw
+    }
+    body.add(g);
+    legs.push(g);
+  };
+  if (rabbit) {
+    leg(0.1, 0.04, 0.06, 0.014, false);
+    leg(0.1, -0.04, 0.06, 0.014, false);
+    leg(-0.07, 0.085, 0.1, 0.02, true);
+    leg(-0.07, -0.085, 0.1, 0.02, true);
+  } else {
+    const len = cat ? 0.17 : 0.23;
+    const w = cat ? 0.022 : 0.03;
+    const fx = cat ? 0.1 : 0.15;
+    const bx = cat ? -0.1 : -0.15;
+    const z = cat ? 0.05 : 0.07;
+    leg(fx, z, len, w, false);
+    leg(fx, -z, len, w, false);
+    leg(bx, z, len, w, true);
+    leg(bx, -z, len, w, true);
+  }
+
+  const size = PET_SIZE[kind];
+  group.scale.setScalar(size.scale);
+  body.position.y = size.baseY;
+  return { kind, group, body, baseY: size.baseY, neck, head, ears, tails, legs, eyes, nose: noseMesh };
+}
+
+// The name over its head, drawn as text on a canvas, never as page markup.
+function buildPetTag(name) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d");
+  ctx.font = "700 40px 'Caveat', 'Segoe UI', sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineWidth = 8;
+  ctx.strokeStyle = "rgba(255,250,235,0.95)";
+  ctx.strokeText(name, 128, 34);
+  ctx.fillStyle = "#4a3a22";
+  ctx.fillText(name, 128, 34);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, depthWrite: false }));
+  sprite.scale.set(1.0, 0.25, 1);
+  sprite.visible = false;
+  return sprite;
+}
+
+function removePet() {
+  if (!petObj) return;
+  scene.remove(petObj.group);
+  scene.remove(petObj.tag);
+  petObj.tag.material.map.dispose();
+  petObj.tag.material.dispose();
+  endPetFeed();
+  petObj = null;
+}
+
+function syncPet() {
+  const pet = petState.pet;
+  if (!pet || !PET_COLOURS[pet.kind]) {
+    removePet();
+    return;
+  }
+  if (petObj && petObj.kind === pet.kind && petObj.name === pet.name) return;
+  const keep = petObj ? { distance: petObj.distance, target: petObj.target, side: petObj.side } : null;
+  removePet();
+  petObj = buildPetModel(pet.kind);
+  petObj.name = pet.name;
+  petObj.tag = buildPetTag(pet.name);
+  petObj.distance = keep?.distance ?? 2;
+  petObj.target = keep?.target ?? 2;
+  petObj.heading = 0;
+  petObj.lastTime = performance.now() / 1000;
+  petObj.cycle = -1;
+  petObj.gaitT = 0;
+  petObj.hopT = 0;
+  scene.add(petObj.group);
+  scene.add(petObj.tag);
+}
+
+const petPanel = document.getElementById("own-pet");
+const petForm = document.getElementById("pet-form");
+const petKindsBox = document.getElementById("pet-kinds");
+const petNameInput = document.getElementById("pet-name");
+const petNote = document.getElementById("pet-note");
+const petFeedButton = document.getElementById("pet-feed");
+const PET_KIND_LABEL = { cat: "Cat", dog: "Dog", rabbit: "Rabbit" };
+let petDraftKind = null;
+let petHeard = false;
+
+// The toast that says something has unlocked: a decoration, or a pet. It is only in your
+// own page and nothing is sent: it is a message, not a badge, so it goes when you close it
+// or leave it a while. If two unlock together they show one after the other.
+const unlockToast = document.getElementById("unlock-toast");
+const toastTitle = document.getElementById("toast-title");
+const toastBody = document.getElementById("toast-body");
+const toastQueue = [];
+let toastCurrent = null;
+let toastTimer = 0;
+const PET_TOAST_KEY = "petToastSeen";
+const DECOR_TOLD_KEY = "decorTold";
+function petToastSeen() {
+  try {
+    return localStorage.getItem(PET_TOAST_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+// How many decorations this browser has already said so about, or null if it has not looked
+// yet (so a first visit with some already unlocked does not shout about all of them).
+function decorTold() {
+  try {
+    const value = localStorage.getItem(DECOR_TOLD_KEY);
+    return value === null ? null : Number(value);
+  } catch {
+    return null;
+  }
+}
+function rememberDecorTold(count) {
+  try {
+    localStorage.setItem(DECOR_TOLD_KEY, String(count));
+  } catch {}
+}
+function toastWhere() {
+  return window.matchMedia("(max-width: 700px)").matches ? "at the bottom of the screen" : "on the left";
+}
+function pushToast(kind, title, body) {
+  toastQueue.push({ kind, title, body });
+  if (!toastCurrent) showNextToast();
+}
+function showNextToast() {
+  toastCurrent = toastQueue.shift() ?? null;
+  clearTimeout(toastTimer);
+  if (!toastCurrent) {
+    unlockToast.hidden = true;
+    return;
+  }
+  toastTitle.textContent = toastCurrent.title;
+  toastBody.textContent = toastCurrent.body;
+  unlockToast.hidden = false;
+  toastTimer = setTimeout(hideUnlockToast, 15000);
+}
+function hideUnlockToast() {
+  clearTimeout(toastTimer);
+  toastCurrent = null;
+  unlockToast.hidden = true;
+  if (toastQueue.length > 0) setTimeout(showNextToast, 350);
+}
+function showPetToast() {
+  try {
+    localStorage.setItem(PET_TOAST_KEY, "1");
+  } catch {}
+  pushToast("pet", "You've unlocked pets!", `A pet is waiting in My garden. Open your journal ${toastWhere()} and look under Your pet to choose one and give it a name.`);
+}
+document.getElementById("toast-close").addEventListener("click", hideUnlockToast);
+document.getElementById("toast-go").addEventListener("click", () => {
+  hideUnlockToast();
+  if (!ownMode) openOwnGarden();
+  const toggle = document.getElementById("gardener-toggle");
+  if (toggle.getAttribute("aria-expanded") === "false") toggle.click();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !unlockToast.hidden) hideUnlockToast();
+});
+
+function renderPetKinds() {
+  petKindsBox.replaceChildren(
+    ...petKinds.map((kind) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.kind = kind;
+      button.setAttribute("role", "radio");
+      button.setAttribute("aria-checked", String(kind === petDraftKind));
+      button.textContent = PET_KIND_LABEL[kind] ?? kind;
+      return button;
+    }),
+  );
+}
+
+// Whether a pet is waiting, and the one you have. Before it unlocks the section is there but
+// locked, and says only that: no count, no way of chasing it.
+function renderPet(state) {
+  const wasUnlocked = petState.unlocked;
+  const first = !petHeard;
+  petHeard = true;
+  petState = state;
+  // Tell you once, in the middle of the screen, that a pet is waiting: when it unlocks while
+  // you are here, or the first time this browser opens the garden with one unclaimed.
+  if (state.unlocked && !state.pet && (first ? !petToastSeen() : !wasUnlocked)) showPetToast();
+  if (state.pet && toastCurrent?.kind === "pet") hideUnlockToast();
+  // Always there in your own garden: locked, with a padlock, until a pet has been unlocked.
+  petPanel.hidden = false;
+  petPanel.classList.toggle("locked", !state.unlocked);
+  document.getElementById("pet-locked").hidden = state.unlocked;
+  petForm.hidden = !state.unlocked;
+  petNote.hidden = !state.unlocked;
+  petFeedButton.hidden = !state.pet;
+  if (state.pet) {
+    petDraftKind = state.pet.kind;
+    if (document.activeElement !== petNameInput) petNameInput.value = state.pet.name;
+    petNote.textContent = `${state.pet.name} is in your garden.`;
+  } else {
+    petDraftKind ??= petKinds[0] ?? null;
+    petNote.textContent = state.unlocked ? "A pet is waiting for you. Choose a kind and a name." : "";
+  }
+  renderPetKinds();
+  syncPet();
+}
+
+petKindsBox.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-kind]");
+  if (!button) return;
+  petDraftKind = button.dataset.kind;
+  renderPetKinds();
+  petKindsBox.querySelector(`[data-kind="${petDraftKind}"]`)?.focus({ preventScroll: true });
+});
+
+petForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (Date.now() < actionsPausedUntil) {
+    petNote.textContent = SLOW_DOWN_MESSAGE;
+    return;
+  }
+  try {
+    const res = await fetch("/api/own-garden/pet", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: petDraftKind, name: petNameInput.value }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 429) {
+        const seconds = Number(res.headers.get("retry-after"));
+        actionsPausedUntil = Date.now() + (Number.isFinite(seconds) && seconds > 0 ? seconds : 5) * 1000;
+      }
+      // The server's own words: it is the one that knows what a name may be.
+      petNote.textContent = body.error ?? "That didn't work just now.";
+    }
+  } catch {
+    petNote.textContent = "Couldn't reach the server — try again.";
+  }
+});
+
+// A generous ball round the pet, like the hens'.
+const PET_REACH = 0.42;
+function petUnderPointer() {
+  if (!petObj) return null;
+  const centre = new THREE.Vector3(petObj.group.position.x, GROUND_Y + 0.3, petObj.group.position.z);
+  const point = new THREE.Vector3();
+  if (!raycaster.ray.intersectSphere(new THREE.Sphere(centre, PET_REACH), point)) return null;
+  return { distance: point.distanceTo(raycaster.ray.origin) };
+}
+
+const PET_STROKE_S = 2.2;
+const PET_FEED_S = 8;
+function addPetHeart() {
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: getHeartTexture(), transparent: true, depthWrite: false }));
+  sprite.scale.set(0.3, 0.3, 1);
+  sprite.visible = false;
+  scene.add(sprite);
+  return sprite;
+}
+function removePetHearts(hearts) {
+  for (const heart of hearts) {
+    scene.remove(heart);
+    heart.material.dispose();
+  }
+}
+
+function strokePet() {
+  if (!petObj || petObj.stroke) return;
+  petObj.stroke = { start: performance.now() / 1000, hearts: [addPetHeart()] };
+  showStatusMessage(`You stroked ${petObj.name}`);
+}
+
+// What each kind is fed, and how far in front of it the dish goes so its nose reaches. A dog
+// gets kibble in a bowl, a cat a fish on a saucer, and a rabbit a carrot with its leaves.
+const FOOD_DIST = { cat: 0.4, dog: 0.56, rabbit: 0.44 };
+function buildPetFood(kind) {
+  const group = new THREE.Group();
+  const materials = [];
+  const mat = (colour, double = false) => {
+    const m = flatMaterial(colour);
+    if (double) m.side = THREE.DoubleSide;
+    materials.push(m);
+    return m;
+  };
+  const geometries = [];
+  const dish = (radius, height, colour, rim) => {
+    const profile = [[0.001, 0], [radius * 0.62, 0], [radius, height], [radius * 0.92, height], [radius * 0.55, 0.012], [0.001, 0.012]].map(([x, y]) => new THREE.Vector2(x, y));
+    const geometry = new THREE.LatheGeometry(profile, 14);
+    geometries.push(geometry);
+    const mesh = new THREE.Mesh(geometry, mat(colour, true));
+    group.add(mesh);
+    if (rim) {
+      const band = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.8, radius * 0.7, 0.012, 14, 1, true), mat(rim, true));
+      geometries.push(band.geometry);
+      band.position.y = height * 0.45;
+      group.add(band);
+    }
+  };
+  const lump = (rx, ry, rz, colour, x, y, z) => {
+    const mesh = cowBlob(rx, ry, rz, mat(colour), x, y, z);
+    group.add(mesh);
+    return mesh;
+  };
+  // Pieces that are eaten one after another, tip or near side first.
+  const pieces = [];
+  if (kind === "dog") {
+    dish(0.15, 0.07, 0x4f7fb0, 0xe8e2d4);
+    const browns = [0x8a5a30, 0x9a6a3a, 0x7a4a26];
+    for (let i = 0; i < 16; i++) {
+      const a = seeded(i * 3.1) * Math.PI * 2;
+      const r = Math.sqrt(seeded(i * 7.7 + 1)) * 0.095;
+      const mound = 1 - r / 0.11;
+      const piece = lump(0.024, 0.018, 0.024, browns[i % 3], Math.cos(a) * r, 0.03 + mound * 0.04, Math.sin(a) * r);
+      piece.rotation.set(seeded(i) * 3, seeded(i + 9) * 3, 0);
+      pieces.push({ mesh: piece, order: -Math.cos(a) * r + seeded(i * 1.9) * 0.05 });
+    }
+  } else if (kind === "cat") {
+    dish(0.13, 0.035, 0xe8dcc4, 0x6a8fb8);
+    const silver = 0xaab8c8;
+    const belly = 0xdde4ea;
+    // A fish lying across the saucer, head towards the cat, in four pieces and a bare backbone.
+    const parts = [
+      { x: -0.07, rx: 0.036, ry: 0.032, rz: 0.026 },
+      { x: -0.02, rx: 0.045, ry: 0.036, rz: 0.028 },
+      { x: 0.04, rx: 0.04, ry: 0.03, rz: 0.024 },
+      { x: 0.095, rx: 0.028, ry: 0.034, rz: 0.006 },
+    ];
+    parts.forEach((part, i) => {
+      const body = lump(part.rx, part.ry, part.rz, i === 3 ? 0x8898aa : silver, part.x, 0.05, 0);
+      lump(part.rx * 0.8, part.ry * 0.45, part.rz * 1.05, belly, part.x, 0.036, 0);
+      pieces.push({ mesh: body, order: i, extra: group.children[group.children.length - 1] });
+    });
+    lump(0.006, 0.006, 0.006, 0x16110e, -0.092, 0.06, 0.02);
+    const eyeFish = group.children[group.children.length - 1];
+    pieces[0].eye = eyeFish;
+    group.userData.bones = [0.0, 0.045, 0.08].map((x) => lump(0.004, 0.012, 0.03, 0xf2eee4, x - 0.03, 0.03, 0));
+    group.userData.bones.forEach((b) => (b.visible = false));
+    group.userData.spine = lump(0.1, 0.004, 0.004, 0xf2eee4, 0.0, 0.03, 0);
+    group.userData.spine.visible = false;
+  } else {
+    // A carrot lying with its leafy top away from the rabbit, in three bites, and a few leaves.
+    const orange = [0xe8812a, 0xdf7420, 0xd6691a];
+    const radii = [[0.004, 0.022], [0.022, 0.034], [0.034, 0.04]];
+    radii.forEach(([top, bottom], i) => {
+      const geometry = new THREE.CylinderGeometry(top, bottom, 0.08, 9);
+      geometries.push(geometry);
+      const mesh = new THREE.Mesh(geometry, mat(orange[i]));
+      mesh.rotation.z = Math.PI / 2;
+      mesh.position.set(-0.08 + i * 0.08, 0.04, 0);
+      group.add(mesh);
+      pieces.push({ mesh, order: i });
+    });
+    const leaves = [0x4f9a3a, 0x5aab44, 0x428a30].map((colour, i) => lump(0.07, 0.008, 0.022, colour, 0.17 + i * 0.01, 0.045 + i * 0.006, (i - 1) * 0.04));
+    leaves.forEach((leaf, i) => (leaf.rotation.y = (i - 1) * 0.5));
+    group.userData.leaves = leaves;
+    // A lettuce leaf beside it, crinkled from a couple of overlapping lumps.
+    lump(0.07, 0.01, 0.055, 0x7cc05a, 0.02, 0.012, 0.13).rotation.y = 0.4;
+    lump(0.05, 0.012, 0.04, 0x90d06a, 0.0, 0.02, 0.14).rotation.y = -0.3;
+  }
+  pieces.sort((x, y) => x.order - y.order);
+  return { group, materials, geometries, pieces };
+}
+
+function feedPet() {
+  if (!petObj || petObj.feed) return;
+  const pet = petObj;
+  const forward = new THREE.Vector2(Math.cos(pet.heading), -Math.sin(pet.heading));
+  const food = buildPetFood(pet.kind);
+  const dist = FOOD_DIST[pet.kind];
+  food.group.position.set(pet.group.position.x + forward.x * dist, GROUND_Y, pet.group.position.z + forward.y * dist);
+  // The dish's own +x points the way the pet faces, so the near side is where it starts eating.
+  food.group.rotation.y = pet.heading;
+  scene.add(food.group);
+  food.group.scale.setScalar(0.01);
+  pet.feed = { start: performance.now() / 1000, food, forward, hearts: [addPetHeart(), addPetHeart(), addPetHeart()] };
+  showStatusMessage(`You fed ${pet.name}`);
+}
+
+function endPetFeed() {
+  const feed = petObj?.feed;
+  if (!feed) return;
+  scene.remove(feed.food.group);
+  for (const geometry of feed.food.geometries) geometry.dispose();
+  for (const material of feed.food.materials) material.dispose();
+  removePetHearts(feed.hearts);
+  petObj.feed = null;
+}
+
+petFeedButton.addEventListener("click", feedPet);
+
+// How each kind moves: a cat strolls, a dog trots, and a rabbit hops in short leaps with
+// a pause to crouch between them.
+const PET_GAIT = {
+  cat: { speed: 0.4, swing: 0.5, rate: 8 },
+  dog: { speed: 0.68, swing: 0.6, rate: 12 },
+  rabbit: { speed: 0.85, hop: 0.62 },
+};
+
+function updatePetFrame() {
+  if (!petObj) return;
+  const pet = petObj;
+  const now = performance.now() / 1000;
+  const dt = Math.min(Math.max(now - pet.lastTime, 0), 0.1);
+  pet.lastTime = now;
+  const still = stillMotion.matches;
+  const gait = PET_GAIT[pet.kind];
+  const cat = pet.kind === "cat";
+  const dog = pet.kind === "dog";
+  const rabbit = pet.kind === "rabbit";
+
+  // Wander: pick somewhere on the path every few seconds and go there, but stand still
+  // while eating.
+  const cycle = Math.floor(now / 8);
+  if (cycle !== pet.cycle) {
+    pet.cycle = cycle;
+    pet.target = seeded(cycle * 13.1 + 0.5) * PET_PATH_LENGTH;
+  }
+  const gap = pet.target - pet.distance;
+  const moving = !pet.feed && !still && Math.abs(gap) > 0.03 ? 1 : 0;
+
+  let step = 0;
+  let air = 0;
+  let pitch = 0;
+  let crouch = 0;
+  if (rabbit) {
+    // A hop is the first 60% of its cycle: crouch, leap, land. It carries on until it has
+    // landed even if it has arrived, so it never stops in mid air.
+    const p0 = (pet.hopT % gait.hop) / gait.hop;
+    if (moving || (p0 > 0 && p0 < 0.6 && !still)) pet.hopT += dt;
+    const p = (pet.hopT % gait.hop) / gait.hop;
+    if (p < 0.6) {
+      const k = p / 0.6;
+      air = Math.sin(Math.PI * k);
+      pitch = 0.35 * Math.cos(Math.PI * k);
+      if (moving) step = gait.speed * dt;
+    } else {
+      crouch = Math.sin(Math.PI * ((p - 0.6) / 0.4));
+    }
+  } else if (moving) {
+    pet.gaitT += dt * gait.rate;
+    step = gait.speed * dt;
+  }
+  if (step > 0) {
+    const dir = Math.sign(gap);
+    const here = petPathPoint(pet.distance);
+    const ahead = petPathPoint(pet.distance + dir * 0.1);
+    if (ahead[0] !== here[0] || ahead[1] !== here[1]) {
+      const goal = Math.atan2(-(ahead[1] - here[1]), ahead[0] - here[0]);
+      pet.heading = lerpAngle(pet.heading, goal, Math.min(1, dt * 8));
+    }
+    pet.distance += dir * Math.min(step, Math.abs(gap));
+  }
+  const [px, pz] = petPathPoint(pet.distance);
+  pet.group.position.set(OWN_CENTRE.x + px, GROUND_Y, OWN_CENTRE.z + pz);
+  pet.group.rotation.y = pet.heading;
+
+  // Legs.
+  if (rabbit) {
+    pet.legs[0].rotation.z = 0.7 * air;
+    pet.legs[1].rotation.z = 0.7 * air;
+    pet.legs[2].rotation.z = -0.9 * air + 0.2 * crouch;
+    pet.legs[3].rotation.z = -0.9 * air + 0.2 * crouch;
+  } else {
+    const stride = Math.sin(pet.gaitT) * gait.swing * moving;
+    pet.legs[0].rotation.z = stride;
+    pet.legs[3].rotation.z = stride;
+    pet.legs[1].rotation.z = -stride;
+    pet.legs[2].rotation.z = -stride;
+  }
+
+  // Body: breathing, a bob as it walks, the arc of a hop.
+  const breath = Math.sin(now * 2.2 + (cat ? 1 : 0)) * 0.012;
+  pet.body.position.y = pet.baseY + (rabbit ? air * 0.13 - crouch * 0.02 : Math.abs(Math.sin(pet.gaitT)) * 0.012 * moving);
+  pet.body.rotation.z = rabbit ? pitch : Math.sin(pet.gaitT * 0.5) * 0.02 * moving;
+  pet.body.scale.set(1, 1 + breath - (rabbit ? crouch * 0.1 : 0), 1);
+
+  // Head: it looks about when still, bobs a little as it walks, and the dog pants.
+  const look = still ? 0 : Math.sin(now * 0.5 + (dog ? 2 : 0)) * (moving ? 0.1 : 0.35);
+  pet.neck.rotation.z = 0;
+  pet.head.rotation.y = look;
+  pet.head.rotation.z = Math.sin(now * 1.3) * 0.04 + (moving && !rabbit ? Math.sin(pet.gaitT) * 0.05 : 0) + (rabbit ? -pitch * 0.5 : 0);
+  if (dog && pet.head.userData.tongue) pet.head.userData.tongue.visible = !still && !pet.feed && Math.sin(now * 0.4) > 0.2;
+
+  // Ears twitch now and then.
+  pet.ears.forEach((e, n) => {
+    const twitch = Math.max(0, Math.sin(now * 0.9 + n * 2.3 + (rabbit ? 1 : 0))) ** 12;
+    e.rotation.x = e.userData.baseX + twitch * 0.3 * e.userData.side;
+    e.rotation.z = e.userData.baseZ - (rabbit ? air * 0.4 : 0);
+  });
+  if (pet.nose && rabbit) {
+    // Twitches: scale from its own small size, not from one.
+    pet.nose.userData.base ??= pet.nose.scale.clone();
+    pet.nose.scale.copy(pet.nose.userData.base).multiplyScalar(1 + Math.sin(now * 16) * 0.22);
+  }
+
+  // Tail: a cat's curls and sways, a dog's wags.
+  if (pet.tails.length > 0) {
+    const [t0, ...rest] = pet.tails;
+    t0.rotation.z = t0.userData.rest;
+    t0.rotation.y = dog ? Math.sin(now * (moving ? 12 : 8)) * 0.3 : Math.sin(now * 1.4) * 0.25;
+    rest.forEach((t, i) => {
+      t.rotation.z = t.userData.rest + (cat ? Math.sin(now * 1.4 + i) * 0.12 : 0);
+      t.rotation.y = 0;
+    });
+  }
+
+  // Eyes blink for a moment every few seconds.
+  const blink = Math.floor(now * 4) % 17 === 0 ? 0.12 : 1;
+  for (const e of pet.eyes) e.mesh.scale.y = e.sy * blink;
+
+  if (pet.stroke) {
+    const t = now - pet.stroke.start;
+    if (t >= PET_STROKE_S) {
+      removePetHearts(pet.stroke.hearts);
+      pet.stroke = null;
+    } else {
+      const settle = 1 - smooth(clamp01((t - 0.2) / 1.6));
+      pet.body.scale.multiplyScalar(1 + 0.07 * Math.sin(Math.PI * clamp01(t / 0.7)));
+      pet.head.rotation.z += 0.3 * settle; // leans up into the hand
+      if (dog && pet.tails[0]) pet.tails[0].rotation.y += Math.sin(t * 22) * 0.5 * settle;
+      if (cat && pet.tails[0]) pet.tails[0].rotation.z -= 0.35 * settle;
+      if (!still) {
+        if (cat) pet.body.position.y += Math.sin(t * 50) * 0.002 * settle; // a purr
+        else pet.body.position.y += Math.abs(Math.sin(t * 8)) * 0.03 * settle;
+      }
+      for (const e of pet.ears) e.rotation.z -= 0.25 * settle * (rabbit ? -1 : 1) * (dog ? 0 : 1);
+      const h = clamp01(t / PET_STROKE_S);
+      const heart = pet.stroke.hearts[0];
+      heart.visible = true;
+      heart.position.set(pet.group.position.x + 0.25, GROUND_Y + 0.65 + h * 0.5, pet.group.position.z);
+      heart.material.opacity = 1 - h * h;
+    }
+  }
+
+  if (pet.feed) {
+    const t = now - pet.feed.start;
+    if (t >= PET_FEED_S) {
+      endPetFeed();
+    } else {
+      const feed = pet.feed;
+      const settleIn = smooth(clamp01(t / 0.5));
+      feed.food.group.scale.setScalar(Math.max(0.01, settleIn));
+      // Down to the dish: the front dips, the neck and head follow, and the paws tuck back.
+      const eatFrom = 1.0;
+      const lower = smooth(clamp01((t - 0.2) / 0.9)) * (1 - smooth(clamp01((t - PET_FEED_S + 0.7) / 0.7)));
+      const eating = clamp01((t - eatFrom) / (PET_FEED_S - eatFrom - 1.0));
+      const bow = rabbit ? 0.045 : cat ? 0.07 : 0.09;
+      pet.body.position.y -= bow * lower;
+      pet.body.rotation.z -= (rabbit ? 0.2 : 0.14) * lower;
+      pet.neck.rotation.z = -0.62 * lower;
+      pet.legs[0].rotation.z = -0.32 * lower;
+      pet.legs[1].rotation.z = -0.32 * lower;
+      // Chewing: quick small movements of the head while it has something in its mouth.
+      const chewing = lower * (eating < 1 ? 1 : 0);
+      const chew = rabbit ? Math.sin(now * 22) * 0.07 : dog ? Math.sin(now * 11) * 0.09 : Math.sin(now * 7) * 0.05;
+      pet.head.rotation.z = -0.85 * lower + chew * chewing + (dog ? Math.max(0, Math.sin(now * 3)) ** 6 * 0.18 * chewing : 0);
+      pet.head.rotation.y = cat ? Math.sin(now * 2) * 0.12 * lower : 0;
+      if (rabbit && pet.nose) pet.nose.scale.copy(pet.nose.userData.base ?? pet.nose.scale).multiplyScalar(1 + Math.sin(now * 28) * 0.3);
+      if (dog && pet.head.userData.tongue) pet.head.userData.tongue.visible = chewing > 0.5 && Math.sin(now * 5) > 0;
+      if (dog && pet.tails[0]) pet.tails[0].rotation.y = Math.sin(now * 14) * 0.5;
+      if (cat && pet.tails[0]) pet.tails[0].rotation.z -= 0.25 * lower;
+      // A rabbit leans in as the carrot gets shorter.
+      if (rabbit) {
+        const creep = 0.15 * eating;
+        pet.group.position.x += feed.forward.x * creep;
+        pet.group.position.z += feed.forward.y * creep;
+      } else if (cat) {
+        const creep = 0.07 * eating;
+        pet.group.position.x += feed.forward.x * creep;
+        pet.group.position.z += feed.forward.y * creep;
+      }
+      // The food goes bit by bit: each piece shrinks away as its turn comes.
+      const n = feed.food.pieces.length;
+      feed.food.pieces.forEach((piece, i) => {
+        const k = clamp01(eating * n - i);
+        piece.mesh.visible = k < 1;
+        if (piece.extra) piece.extra.visible = k < 1;
+        if (piece.eye) piece.eye.visible = k < 1;
+        if (!piece.mesh.userData.size) piece.mesh.userData.size = piece.mesh.scale.clone();
+        piece.mesh.scale.copy(piece.mesh.userData.size).multiplyScalar(Math.max(0.05, 1 - k * 0.6));
+      });
+      const bones = feed.food.group.userData.bones;
+      if (bones) {
+        const done = eating > 0.7;
+        feed.food.group.userData.spine.visible = done;
+        bones.forEach((bone) => (bone.visible = done));
+      }
+      const leaves = feed.food.group.userData.leaves;
+      if (leaves) for (const leaf of leaves) leaf.visible = eating < 0.97;
+      // Hearts float up while it eats.
+      feed.hearts.forEach((heart, n2) => {
+        const h = (t - 1.5 - n2 * 1.7) / 1.6;
+        heart.visible = h > 0 && h < 1;
+        if (!heart.visible) return;
+        heart.position.set(pet.group.position.x + 0.25, GROUND_Y + 0.65 + h * 0.5, pet.group.position.z);
+        heart.material.opacity = 1 - h * h;
+      });
+    }
+  }
+
+  // Its name floats over it, but only while you are looking at your own garden.
+  pet.tag.visible = ownMode && !photoMode;
+  pet.tag.position.set(pet.group.position.x, GROUND_Y + 1.1, pet.group.position.z);
+}
+
 // A barn for the cows, out on the lawn between two of their patches, facing the garden:
 // a red barn with a gambrel roof, white-trimmed double doors, a hay loft with straw
 // poking out, a stack of bales and a water trough. All for show, like the cows: nobody
@@ -6225,6 +7047,7 @@ function animate() {
   updateFireflies(serverNow() / 1000);
   updateCows(serverNow() / 1000);
   updateHens(serverNow() / 1000);
+  updatePetFrame();
   updateHills();
   updateCottage(serverNow() / 1000);
   updateDrops(now);
