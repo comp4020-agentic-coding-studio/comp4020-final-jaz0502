@@ -14,7 +14,7 @@ afterEach(() => {
 
 interface Decorations {
   unlocked: string[];
-  nextIn: number | null;
+  next: { do: string; left: number } | null;
   placed: Record<string, string>;
 }
 
@@ -43,7 +43,7 @@ async function decorate(app: PrivateApp, gid: string, body: unknown) {
 // watering to count, so a short one keeps them quick.
 const LONG_GAP = 2500;
 const SHORT_GAP = 400;
-const env = (gap: number) => ({ DECORATION_EVERY: "2", DECORATION_GAP_MS: String(gap), ACTION_LIMIT: "1000", ...NO_PLANT_LIMIT });
+const env = (gap: number) => ({ DECORATION_EVERY: "2", DECORATION_TASKS: "water", DECORATION_GAP_MS: String(gap), ACTION_LIMIT: "1000", ...NO_PLANT_LIMIT });
 
 // Plants these plots, then waits until all of them have rested long enough that a
 // watering counts. A sleep never ends early, so this is safe on a slow machine.
@@ -72,9 +72,9 @@ describe("unlocking decorations by watering the shared garden", () => {
     expect(hello.decorations.filter((d) => d.kind === "fence").map((d) => d.id)).toEqual(["picket", "rustic", "stone"]);
   });
 
-  it("starts with nothing unlocked and says how many waterings until the first", async () => {
+  it("starts with nothing unlocked and says what there is to do for the first", async () => {
     const stream = await join(app, newVisitor(app.url).gid);
-    expect(frames(stream)).toEqual([{ unlocked: [], nextIn: 2, placed: {} }]);
+    expect(frames(stream)).toEqual([{ unlocked: [], next: { do: "water", left: 2 }, placed: {} }]);
   });
 
   it("unlocks the next decoration in a fixed order every so many waterings", async () => {
@@ -83,12 +83,12 @@ describe("unlocking decorations by watering the shared garden", () => {
     await plantRested(alice, [0, 1, 2, 3], LONG_GAP);
 
     await alice.post(0, "water");
-    await stream.waitFor((f) => f.event === "decorations" && (f.data as Decorations).nextIn === 1);
+    await stream.waitFor((f) => f.event === "decorations" && (f.data as Decorations).next?.left === 1);
     expect(frames(stream).at(-1)!.unlocked).toEqual([]);
 
     await alice.post(1, "water");
     await stream.waitFor((f) => f.event === "decorations" && (f.data as Decorations).unlocked.length === 1);
-    expect(frames(stream).at(-1)).toEqual({ unlocked: ["bench"], nextIn: 2, placed: {} });
+    expect(frames(stream).at(-1)).toEqual({ unlocked: ["bench"], next: { do: "water", left: 2 }, placed: {} });
 
     await alice.post(2, "water");
     await alice.post(3, "water");
@@ -104,7 +104,7 @@ describe("unlocking decorations by watering the shared garden", () => {
     for (let i = 0; i < 5; i++) await alice.post(4, "water");
     await sleep(200);
     // The first counted and the other four came too soon after it.
-    expect(frames(stream).at(-1)).toEqual({ unlocked: [], nextIn: 1, placed: {} });
+    expect(frames(stream).at(-1)).toEqual({ unlocked: [], next: { do: "water", left: 1 }, placed: {} });
 
     await sleep(LONG_GAP + 100);
     await alice.post(4, "water");
@@ -118,7 +118,7 @@ describe("unlocking decorations by watering the shared garden", () => {
     // Watering straight after planting is too soon: planting waters the plot.
     await alice.post(5, "water");
     await sleep(200);
-    expect(frames(stream).at(-1)).toEqual({ unlocked: [], nextIn: 2, placed: {} });
+    expect(frames(stream).at(-1)).toEqual({ unlocked: [], next: { do: "water", left: 2 }, placed: {} });
 
     // Your own garden is yours: tending it earns nothing.
     const own = await fetch(new URL("/api/own-garden/0/water", app.url), {
@@ -126,7 +126,7 @@ describe("unlocking decorations by watering the shared garden", () => {
       headers: { cookie: `gid=${alice.gid}`, ...fresh },
     });
     expect(own.status).toBe(409);
-    expect(frames(stream).at(-1)!.nextIn).toBe(2);
+    expect(frames(stream).at(-1)!.next?.left).toBe(2);
   });
 
   it("counts a watering of someone else's plant", async () => {
@@ -177,7 +177,7 @@ describe("placing decorations", () => {
     await stream.waitFor((f) => f.event === "decorations" && (f.data as Decorations).placed["prop-1"] === "bench");
     await sleep(300);
 
-    expect(frames(bobStream)).toEqual([{ unlocked: [], nextIn: 2, placed: {} }]);
+    expect(frames(bobStream)).toEqual([{ unlocked: [], next: { do: "water", left: 2 }, placed: {} }]);
     expect(bobStream.frames.some((f) => f.event === "activity" && (f.data as { did: string }).did === "decorate")).toBe(false);
     expect(stream.raw()).not.toContain(alice.gid);
 

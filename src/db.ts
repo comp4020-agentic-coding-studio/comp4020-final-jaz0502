@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { type DecorationState, MAX_CREDIT, stateFor } from "./decorations.ts";
+import { DECORATIONS, type DecorationState, type TaskKind, stateFor, TASKS } from "./decorations.ts";
 import { GRID_SIZE } from "./garden.ts";
 import { type Pet, type PetKind, type PetState, petUnlocked } from "./pets.ts";
 import type { PlantType, Plot, PlotState } from "./types.ts";
@@ -356,18 +356,26 @@ export function hasOwnGarden(owner: string): boolean {
   return Boolean(ownHasStmt.get(owner));
 }
 
-// Decorations for your own garden. `decoration_credit` is how many waterings have
-// counted for a gardener, which only ever goes up (so an unlocked decoration is never
-// taken back) and stops once everything is unlocked. `own_decor` is what they have put
-// where. Both are keyed by the public id, never the cookie, and go to that gardener
-// alone. A row appears with a gardener's first counting watering, and only this many
-// gardeners keep one, so a stranger minting cookies can't grow the database without
-// limit.
+// Decorations for your own garden. `decoration_progress` is how far a gardener has got: how
+// many decorations are unlocked (`stage`, which only ever goes up, so an unlocked decoration
+// is never taken back) and how much of the current task is done. `own_decor` is what they
+// have put where. Both are keyed by the public id, never the cookie, and go to that
+// gardener alone. A row appears with a gardener's first counting action, and only this many
+// gardeners keep one, so a stranger minting cookies can't grow the database without limit.
+// `decoration_credit` is what an earlier version counted (ten waterings a decoration); it is
+// read once, below, so nobody loses a decoration they had.
 db.exec(`
   CREATE TABLE IF NOT EXISTS decoration_credit (
     owner   TEXT    PRIMARY KEY,
     credit  INTEGER NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS decoration_progress (
+    owner    TEXT    PRIMARY KEY,
+    stage    INTEGER NOT NULL,
+    progress INTEGER NOT NULL
+  );
+  INSERT OR IGNORE INTO decoration_progress (owner, stage, progress)
+    SELECT owner, MIN(credit / 10, ${DECORATIONS.length}), 0 FROM decoration_credit WHERE credit >= 10;
   CREATE TABLE IF NOT EXISTS own_decor (
     owner      TEXT NOT NULL,
     spot       TEXT NOT NULL,
@@ -378,11 +386,11 @@ db.exec(`
 
 const MAX_DECOR_KEEPERS = Number(process.env.MAX_DECOR_KEEPERS ?? 2000);
 
-const creditStmt = db.prepare("SELECT credit FROM decoration_credit WHERE owner = ?");
-const creditCountStmt = db.prepare("SELECT COUNT(*) AS n FROM decoration_credit");
-const addCreditStmt = db.prepare(`
-  INSERT INTO decoration_credit (owner, credit) VALUES (?, 1)
-  ON CONFLICT (owner) DO UPDATE SET credit = credit + 1
+const progressStmt = db.prepare("SELECT stage, progress FROM decoration_progress WHERE owner = ?");
+const progressCountStmt = db.prepare("SELECT COUNT(*) AS n FROM decoration_progress");
+const setProgressStmt = db.prepare(`
+  INSERT INTO decoration_progress (owner, stage, progress) VALUES (?, ?, ?)
+  ON CONFLICT (owner) DO UPDATE SET stage = excluded.stage, progress = excluded.progress
 `);
 const placedStmt = db.prepare("SELECT spot, decoration FROM own_decor WHERE owner = ?");
 const placeStmt = db.prepare(`
@@ -391,26 +399,31 @@ const placeStmt = db.prepare(`
 `);
 const clearSpotStmt = db.prepare("DELETE FROM own_decor WHERE owner = ? AND spot = ?");
 
+function progressOf(owner: string): { stage: number; progress: number } {
+  return (progressStmt.get(owner) as unknown as { stage: number; progress: number } | undefined) ?? { stage: 0, progress: 0 };
+}
+
 export function getDecorations(owner: string): DecorationState {
-  const credit = (creditStmt.get(owner) as unknown as { credit: number } | undefined)?.credit ?? 0;
+  const { stage, progress } = progressOf(owner);
   const placed: Record<string, string> = {};
   for (const row of placedStmt.all(owner) as unknown as { spot: string; decoration: string }[]) {
     placed[row.spot] = row.decoration;
   }
-  return stateFor(credit, placed);
+  return stateFor(stage, progress, placed);
 }
 
-// Counts one watering towards the next decoration. Returns false if it did not
-// count: everything is already unlocked, or there is no room to keep another gardener.
-export function creditWatering(owner: string): boolean {
-  const row = creditStmt.get(owner) as unknown as { credit: number } | undefined;
-  if (!row) {
-    const { n } = creditCountStmt.get() as unknown as { n: number };
+// Counts one thing done towards the task a gardener is on. Returns false if it did not
+// count: it is not the task they are on, everything is already unlocked, or there is no
+// room to keep another gardener.
+export function creditTask(owner: string, did: TaskKind): boolean {
+  const { stage, progress } = progressOf(owner);
+  if (stage >= DECORATIONS.length || TASKS[stage].kind !== did) return false;
+  if (!progressStmt.get(owner)) {
+    const { n } = progressCountStmt.get() as unknown as { n: number };
     if (n >= MAX_DECOR_KEEPERS) return false;
-  } else if (row.credit >= MAX_CREDIT) {
-    return false;
   }
-  addCreditStmt.run(owner);
+  if (progress + 1 >= TASKS[stage].count) setProgressStmt.run(owner, stage + 1, 0);
+  else setProgressStmt.run(owner, stage, progress + 1);
   return true;
 }
 
@@ -435,9 +448,8 @@ const setPetStmt = db.prepare(`
 `);
 
 export function getPetState(owner: string): PetState {
-  const credit = (creditStmt.get(owner) as unknown as { credit: number } | undefined)?.credit ?? 0;
   const row = petStmt.get(owner) as unknown as Pet | undefined;
-  return { unlocked: petUnlocked(credit), pet: row ? { kind: row.kind, name: row.name } : null };
+  return { unlocked: petUnlocked(progressOf(owner).stage), pet: row ? { kind: row.kind, name: row.name } : null };
 }
 
 // Adopts a pet, or renames or changes the one you have. The caller has checked that the

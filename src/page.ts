@@ -150,7 +150,7 @@ export function renderPage(): string {
       <!-- In your own garden only: the decorations you have unlocked, to put out or take away. -->
       <div id="own-decor" class="own-seeds" hidden>
         <h3 class="paper-heading">Decorations</h3>
-        <p id="decor-locked" class="locked-note" hidden><svg class="lock-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 11V8a5 5 0 0 1 10 0v3"/><rect x="5" y="11" width="14" height="9" rx="2"/><circle cx="12" cy="15.5" r="1.2"/></svg><span>Locked. Water plants in the shared garden to unlock decorations for your garden.</span></p>
+        <p id="decor-locked" class="locked-note" hidden><svg class="lock-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 11V8a5 5 0 0 1 10 0v3"/><rect x="5" y="11" width="14" height="9" rx="2"/><circle cx="12" cy="15.5" r="1.2"/></svg><span>Locked. Look after the shared garden, its cows and its hens, to unlock decorations for your garden.</span></p>
         <div id="decor-picker" role="group" aria-label="Decorations for your garden"></div>
       </div>
       <!-- In your own garden only, once a pet has been unlocked: choose a kind, give it a name, feed it. -->
@@ -191,6 +191,11 @@ export function renderPage(): string {
   <!-- The same kind of sign, floating over your own garden: it is the way in. -->
   <button type="button" id="own-sign" class="bed-sign own-sign" aria-label="Visit your own garden, which only you can see" hidden>
     <span class="bed-sign-label">My garden</span>
+  </button>
+
+  <!-- The way into the barn, floating over it like the sign over your own garden. -->
+  <button type="button" id="barn-sign" class="bed-sign own-sign" aria-label="Go to the barn, and inside it, which only you can see" hidden>
+    <span class="bed-sign-label">Go to the barn</span>
   </button>
 
   <div id="photo-ui" hidden>
@@ -248,6 +253,17 @@ export function renderPage(): string {
     </div>
     <p class="own-note">Only you can see it. Plant your seeds and look after them.</p>
   </div>
+
+  <!-- Inside the barn: a private view, so the garden's panels step aside. -->
+  <div id="interior-bar" class="paper" role="region" aria-label="Inside the barn" hidden>
+    <div class="own-bar-head">
+      <h2 class="paper-title">The barn</h2>
+      <button type="button" id="interior-back">Back outside</button>
+    </div>
+    <p class="own-note">Only you can see in here. Walk with W A S D, turn with the arrow keys or by dragging, and click a cow to give it hay.</p>
+  </div>
+  <div id="interior-stick" hidden aria-hidden="true"><span id="interior-knob"></span></div>
+  <div id="interior-fade" aria-hidden="true"></div>
 
   <!-- Said once, in the middle of the screen, when a pet has been unlocked. Only you see it. -->
   <div id="unlock-toast" class="paper" role="status" aria-live="polite" hidden>

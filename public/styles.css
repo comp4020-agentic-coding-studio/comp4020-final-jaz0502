@@ -868,7 +868,8 @@ body {
 }
 
 /* Your own garden's bar: a slip of the same paper, top centre, with your seeds. */
-#own-bar {
+#own-bar,
+#interior-bar {
   position: fixed;
   z-index: 3;
   top: 16px;
@@ -884,7 +885,8 @@ body {
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25), inset 0 0 26px rgba(150, 100, 40, 0.38);
 }
 
-#own-bar[hidden] {
+#own-bar[hidden],
+#interior-bar[hidden] {
   display: none;
 }
 
@@ -895,12 +897,14 @@ body {
   gap: 0.75rem;
 }
 
-#own-bar .paper-title {
+#own-bar .paper-title,
+#interior-bar .paper-title {
   margin: 0;
   font-size: 1.9rem;
 }
 
-#own-back {
+#own-back,
+#interior-back {
   padding: 0.4rem 0.9rem;
   font: inherit;
   font-size: 0.88rem;
@@ -914,7 +918,9 @@ body {
 }
 
 #own-back:hover,
-#own-back:focus-visible {
+#own-back:focus-visible,
+#interior-back:hover,
+#interior-back:focus-visible {
   background: #3b5529;
 }
 
@@ -1283,23 +1289,87 @@ body.own-mode .bed-sign {
   display: none !important;
 }
 
-body.photo-mode #own-bar {
+body.photo-mode #own-bar,
+body.photo-mode #interior-bar,
+body.photo-mode #interior-stick {
   display: none !important;
+}
+
+/* Inside a building the garden's panels step aside; the camera stays. Nothing here is
+   shown to anyone else. */
+body.interior-mode #panels,
+body.interior-mode .bed-sign,
+body.interior-mode #quick-bag,
+body.interior-mode #quick-wave {
+  display: none !important;
+}
+
+#interior-fade {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  background: #1c1610;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 250ms ease;
+}
+
+#interior-fade.on {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #interior-fade {
+    transition: none;
+  }
+}
+
+/* A round stick to walk with, on a touch screen only. */
+#interior-stick {
+  position: fixed;
+  z-index: 3;
+  left: 22px;
+  bottom: 28px;
+  width: 6.5rem;
+  height: 6.5rem;
+  border-radius: 50%;
+  background: rgba(255, 250, 240, 0.28);
+  border: 2px solid rgba(255, 250, 240, 0.7);
+  touch-action: none;
+}
+
+#interior-stick[hidden] {
+  display: none;
+}
+
+#interior-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2.6rem;
+  height: 2.6rem;
+  margin: -1.3rem 0 0 -1.3rem;
+  border-radius: 50%;
+  background: rgba(255, 250, 240, 0.85);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 /* On a phone the bar is a small strip, so the garden stays in view. */
 @media (max-width: 700px) {
-  #own-bar {
+  #own-bar,
+  #interior-bar {
     top: 10px;
     padding: 0.4rem 0.7rem 0.55rem;
   }
 
-  #own-bar .paper-title {
+  #own-bar .paper-title,
+  #interior-bar .paper-title {
     font-size: 1.5rem;
     white-space: nowrap;
   }
 
-  #own-back {
+  #own-back,
+  #interior-back {
     padding: 0.35rem 0.75rem;
     font-size: 0.8rem;
   }
@@ -1308,12 +1378,14 @@ body.photo-mode #own-bar {
     display: none;
   }
 
-  #own-bar .own-note:first-of-type {
+  #own-bar .own-note:first-of-type,
+  #interior-bar .own-note {
     display: none;
   }
 
   /* The hint sits just under the bar, not behind it. */
-  body.own-mode #status-bar {
+  body.own-mode #status-bar,
+  body.interior-mode #status-bar {
     top: 76px;
   }
 
@@ -1841,5 +1913,12 @@ body.photo-mode .bed-sign {
   #status-bar {
     bottom: auto;
     top: 12px;
+  }
+}
+
+/* Inside a building there is no bottom sheet, so the camera button drops to the corner. */
+@media (max-width: 700px) {
+  body.interior-mode #quick-actions {
+    bottom: 28px;
   }
 }

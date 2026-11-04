@@ -23,6 +23,7 @@ export interface Hello {
   decorations: { id: string; name: string; kind: "fence" | "prop" }[];
   // The kinds of pet there are, so the page keeps no copy of the list.
   pets: string[];
+  animals: Record<string, number>;
 }
 
 type SseEvent =

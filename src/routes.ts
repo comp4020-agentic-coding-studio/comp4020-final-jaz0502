@@ -1,7 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { recordActivity } from "./activity.ts";
 import * as db from "./db.ts";
-import { DECORATIONS, decorationById, spotKind, wateringCounts } from "./decorations.ts";
+import { type AnimalKind, animalCounts, animalIndex } from "./animals.ts";
+import { DECORATIONS, ANIMALS, type TaskKind, decorationById, spotKind, wateringCounts } from "./decorations.ts";
 import { BEDS, DAY_LENGTH_MS, WILT_WINDOW_MS, bedAt, bedOfPlot, bedTakes, derivePlot, isPlantType } from "./garden.ts";
 import { getOrSetIdentity, publicId } from "./identity.ts";
 import { allowAction, mayPlant, recordPlanting } from "./limits.ts";
@@ -104,8 +105,27 @@ function refusalReason(position: number, action: "plant" | "water" | "compost"):
   return "not-wilted";
 }
 
+// Counts something a gardener did towards the task they are on, and tells them (only them)
+// when a decoration, or the pet after the last one, unlocks.
+function creditTowards(who: string, did: TaskKind): void {
+  const before = db.getDecorations(who).unlocked.length;
+  const hadPet = db.getPetState(who).unlocked;
+  if (!db.creditTask(who, did)) return;
+  const state = db.getDecorations(who);
+  if (state.unlocked.length > before) logEvent(who, "unlock", { decoration: DECORATIONS[before].id });
+  sendDecorations(who, state);
+  // The last decoration brings a pet with it.
+  const pet = db.getPetState(who);
+  if (pet.unlocked && !hadPet) {
+    logEvent(who, "unlock", { reward: "pet" });
+    sendPet(who, pet);
+  }
+}
+
 const ACTION_PATTERN =/^\/api\/plots\/(\d+)\/(plant|water|compost)$/;
 const GATHER_PATTERN = /^\/api\/plots\/(\d+)\/gather$/;
+// Feeding a cow or stroking a hen: only to count it, since the animals are drawn in each page.
+const ANIMAL_PATTERN = /^\/api\/animals\/(cow|hen)\/(\d+)$/;
 // Putting a decoration on a spot in your own garden (or clearing the spot). Whose
 // garden it is comes from the cookie alone.
 const DECORATE_PATH = "/api/own-garden/decorate";
@@ -208,6 +228,7 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
         beds: BEDS.map(({ name, takes }) => ({ name, takes })),
         decorations: DECORATIONS.map(({ id, name, kind }) => ({ id, name, kind })),
         pets: [...PET_KINDS],
+        animals: { ...ANIMALS },
       },
       publicId(identity),
       db.getStats(publicId(identity)),
@@ -292,6 +313,7 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
     if (result.ok) {
       logEvent(who, "gather", { plot: position, type: plot!.plantType!, seeds: result.gained, result: "ok" });
       sendSeeds(who, result.seeds);
+      creditTowards(who, "gather");
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ type: plot!.plantType, gained: result.gained }));
     } else {
@@ -299,6 +321,41 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
       res.writeHead(result.reason === "no-such-plot" ? 404 : 409, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: GATHER_REFUSALS[result.reason] ?? "There is no plot there." }));
     }
+    return;
+  }
+
+  // Feeding a cow or stroking a hen. Nothing in the garden changes, so there is nothing to
+  // broadcast and nothing for Recent; it only counts towards the gardener's next decoration.
+  const animalMatch = pathname.match(ANIMAL_PATTERN);
+  if (req.method === "POST" && animalMatch) {
+    const kind = animalMatch[1] as AnimalKind;
+    const did: TaskKind = kind === "cow" ? "feed-cow" : "pat-hen";
+    const who = publicId(identity);
+    const limit = allowAction(who, Date.now());
+    if (!limit.ok) {
+      if (limit.firstRefusal) logEvent(who, did, { result: "refused", reason: "rate-limited" });
+      res.writeHead(429, {
+        "content-type": "application/json",
+        "retry-after": String(Math.max(1, Math.ceil(limit.retryAfterMs / 1000))),
+      });
+      res.end(JSON.stringify({ error: "Slow down: too many actions, try again in a few seconds" }));
+      return;
+    }
+    const index = animalIndex(kind, Number(animalMatch[2]));
+    if (index === null) {
+      logEvent(who, did, { result: "refused", reason: "no-such-animal" });
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: `There is no such ${kind}.` }));
+      return;
+    }
+    if (animalCounts(who, kind, index, Date.now())) {
+      logEvent(who, did, { animal: index, result: "ok" });
+      creditTowards(who, did);
+    } else {
+      logEvent(who, did, { animal: index, result: "refused", reason: "too-soon" });
+    }
+    res.writeHead(204);
+    res.end();
     return;
   }
 
@@ -519,7 +576,7 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
 
     // Whether this watering will count towards a decoration, read before it changes
     // the plot's last-watered time.
-    const countsTowardsDecoration = action === "water" && wateringCounts(db.getPlot(position)?.lastWateredAt ?? null, Date.now());
+    const countsAsWatering = action === "water" && wateringCounts(db.getPlot(position)?.lastWateredAt ?? null, Date.now());
 
     const result =
       action === "plant"
@@ -540,22 +597,9 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
       // own streams only.
       sendStats(publicId(identity), db.recordAction(publicId(identity), action, Date.now()));
 
-      // Looking after the shared garden earns decorations for your own, privately.
-      if (countsTowardsDecoration) {
-        const before = db.getDecorations(who).unlocked.length;
-        const hadPet = db.getPetState(who).unlocked;
-        if (db.creditWatering(who)) {
-          const state = db.getDecorations(who);
-          if (state.unlocked.length > before) logEvent(who, "unlock", { decoration: DECORATIONS[before].id });
-          sendDecorations(who, state);
-          // The last decoration brings a pet with it.
-          const pet = db.getPetState(who);
-          if (pet.unlocked && !hadPet) {
-            logEvent(who, "unlock", { reward: "pet" });
-            sendPet(who, pet);
-          }
-        }
-      }
+      // Looking after the shared garden earns decorations for your own, privately. A
+      // watering counts only on a rested plot; planting and composting count as they are.
+      if (action === "water" ? countsAsWatering : true) creditTowards(who, action === "water" ? "water" : action === "plant" ? "plant" : "compost");
 
       const publicResult = toPublic(result);
       broadcastUpdate(publicResult);

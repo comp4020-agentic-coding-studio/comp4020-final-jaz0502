@@ -2,7 +2,7 @@
 // order, so nobody chooses what to chase. It is private to the gardener, like their seeds
 // and decorations: only they are told, it is kept by public id and never the cookie, and
 // it is never taken back, renamed away or compared with anyone's.
-import { MAX_CREDIT } from "./decorations.ts";
+import { DECORATIONS } from "./decorations.ts";
 
 export const PET_KINDS = ["cat", "dog", "rabbit"] as const;
 export type PetKind = (typeof PET_KINDS)[number];
@@ -32,7 +32,7 @@ export function petKindOf(kind: unknown): PetKind | undefined {
   return PET_KINDS.find((k) => k === kind);
 }
 
-// A pet unlocks once every decoration has, and credit never goes down.
-export function petUnlocked(credit: number): boolean {
-  return credit >= MAX_CREDIT;
+// A pet unlocks once every decoration has, and the stage never goes down.
+export function petUnlocked(stage: number): boolean {
+  return stage >= DECORATIONS.length;
 }

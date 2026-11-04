@@ -18,7 +18,7 @@ interface PetState {
 }
 
 const GAP = 400;
-const env = { DECORATION_EVERY: "1", DECORATION_GAP_MS: String(GAP), ACTION_LIMIT: "1000", ...NO_PLANT_LIMIT };
+const env = { DECORATION_EVERY: "1", DECORATION_TASKS: "water", DECORATION_GAP_MS: String(GAP), ACTION_LIMIT: "1000", ...NO_PLANT_LIMIT };
 
 async function join(app: PrivateApp, gid: string): Promise<Stream> {
   const stream = await openStream(app.url, gid);

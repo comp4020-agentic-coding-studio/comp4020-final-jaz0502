@@ -1,6 +1,5 @@
 // Decorations for your own garden, unlocked by looking after the shared one. The list
-// is fixed and in a fixed order, so nobody chooses what to chase: every EVERY
-// waterings that count unlocks the next one. They are private to the gardener, like
+// is fixed and in a fixed order, so nobody chooses what to chase: each one has a task. They are private to the gardener, like
 // their seeds and their record, and are never compared, ranked or taken back.
 
 export interface Decoration {
@@ -29,15 +28,49 @@ export const DECORATIONS: readonly Decoration[] = [
 export const PROP_SPOTS = 5;
 export const SPOTS: readonly string[] = ["fence", ...Array.from({ length: PROP_SPOTS }, (_, i) => `prop-${i}`)];
 
-// Env-overridable so specs can use a small number and a short gap.
-// Every this many counting waterings unlocks the next decoration.
-export const WATERINGS_PER_DECORATION = Number(process.env.DECORATION_EVERY ?? 10);
+// What it takes to unlock each decoration, in the same fixed order: one task each, the same
+// for everyone, so nobody chooses an order to chase. Only one task is shown at a time, and
+// only how many more of it are left. A decoration, once unlocked, is never taken back.
+export type TaskKind = "water" | "feed-cow" | "pat-hen" | "plant" | "gather" | "compost";
+export const TASK_KINDS: readonly TaskKind[] = ["water", "feed-cow", "pat-hen", "plant", "gather", "compost"];
+
+export interface Task {
+  kind: TaskKind;
+  count: number;
+}
+
+const DEFAULT_TASKS: readonly Task[] = [
+  { kind: "water", count: 5 }, // bench
+  { kind: "feed-cow", count: 3 }, // picket fence
+  { kind: "pat-hen", count: 4 }, // lantern
+  { kind: "plant", count: 5 }, // scarecrow
+  { kind: "gather", count: 3 }, // rustic fence
+  { kind: "water", count: 8 }, // gnome
+  { kind: "feed-cow", count: 5 }, // birdbath
+  { kind: "pat-hen", count: 6 }, // stone wall
+];
+
+// Env-overridable so specs and a quick look can use a small number: DECORATION_EVERY makes
+// every task that many, and DECORATION_TASKS (a comma list of kinds) sets the kinds, used
+// round in turn.
+const EVERY = process.env.DECORATION_EVERY === undefined ? null : Number(process.env.DECORATION_EVERY);
+const KINDS = (process.env.DECORATION_TASKS ?? "")
+  .split(",")
+  .filter((k): k is TaskKind => (TASK_KINDS as readonly string[]).includes(k));
+
+export const TASKS: readonly Task[] = DECORATIONS.map((_, i) => ({
+  kind: KINDS.length > 0 ? KINDS[i % KINDS.length] : DEFAULT_TASKS[i].kind,
+  count: EVERY ?? DEFAULT_TASKS[i].count,
+}));
+
 // A watering counts only on a plot nobody has watered for this long, so one plot
 // watered over and over is worth one watering, not many.
 export const DECORATION_GAP_MS = Number(process.env.DECORATION_GAP_MS ?? 10 * 60_000);
-
-// Once everything is unlocked there is nothing more to count towards.
-export const MAX_CREDIT = WATERINGS_PER_DECORATION * DECORATIONS.length;
+// A cow or a hen counts again for the same gardener only after this long, so one animal
+// fed or stroked over and over is worth one, not many.
+export const ANIMAL_GAP_MS = Number(process.env.ANIMAL_GAP_MS ?? 60_000);
+// How many of each animal the garden has: the page draws this many, numbered from 0.
+export const ANIMALS = { cow: 5, hen: 4 } as const;
 
 export function decorationById(id: unknown): Decoration | undefined {
   return DECORATIONS.find((d) => d.id === id);
@@ -48,20 +81,19 @@ export function spotKind(spot: unknown): "fence" | "prop" | null {
   return spot === "fence" ? "fence" : "prop";
 }
 
-// What one gardener has, as it is sent to them: what is unlocked, how many more
-// counting waterings until the next one (null once all are unlocked), and what they
-// have put where.
+// What one gardener has, as it is sent to them: what is unlocked, the one task they are on
+// and how many of it are left (null once all are unlocked), and what they have put where.
 export interface DecorationState {
   unlocked: string[];
-  nextIn: number | null;
+  next: { do: TaskKind; left: number } | null;
   placed: Record<string, string>;
 }
 
-export function stateFor(credit: number, placed: Record<string, string>): DecorationState {
-  const count = Math.min(Math.floor(credit / WATERINGS_PER_DECORATION), DECORATIONS.length);
+export function stateFor(stage: number, progress: number, placed: Record<string, string>): DecorationState {
+  const count = Math.min(stage, DECORATIONS.length);
   return {
     unlocked: DECORATIONS.slice(0, count).map((d) => d.id),
-    nextIn: count >= DECORATIONS.length ? null : WATERINGS_PER_DECORATION - (credit % WATERINGS_PER_DECORATION),
+    next: count >= DECORATIONS.length ? null : { do: TASKS[count].kind, left: TASKS[count].count - progress },
     placed,
   };
 }
