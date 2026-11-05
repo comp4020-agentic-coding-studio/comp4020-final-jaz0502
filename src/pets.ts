@@ -19,13 +19,19 @@ export interface PetState {
 }
 
 // The name is the one piece of text a stranger can type, so it is kept very small: letters
-// and digits only, so it can never carry markup, spaces or `=` that could forge a log line
-// or break a page. It is never logged and never sent to anyone but its owner.
+// only, so it can never carry markup, digits, spaces or `=` that could forge a log line or
+// break a page. The server makes the first letter a capital, so it reads the same whatever
+// was typed. It is never logged and never sent to anyone but its owner.
 export const PET_NAME_MAX = 12;
-const PET_NAME = new RegExp(`^[A-Za-z0-9]{1,${PET_NAME_MAX}}$`);
+const PET_NAME = new RegExp(`^[A-Za-z]{1,${PET_NAME_MAX}}$`);
 
 export function validPetName(name: unknown): name is string {
   return typeof name === "string" && PET_NAME.test(name);
+}
+
+// "mochi" and "mOCHI" are kept as "Mochi": the first letter a capital, the rest as typed.
+export function tidyPetName(name: string): string {
+  return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
 export function petKindOf(kind: unknown): PetKind | undefined {

@@ -1922,3 +1922,39 @@ body.photo-mode .bed-sign {
     bottom: 28px;
   }
 }
+
+/* Feed your pet from inside the cottage, a plain button at the bottom centre. */
+#interior-feed {
+  position: fixed;
+  z-index: 3;
+  left: 50%;
+  bottom: 64px;
+  transform: translateX(-50%);
+  padding: 0.55rem 1.2rem;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #fff;
+  background: #4a6a35;
+  border: 0;
+  border-radius: 999px;
+  box-shadow: 0 3px 0 #2f4721, 0 4px 14px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
+
+#interior-feed[hidden],
+body:not(.interior-mode) #interior-feed,
+body.photo-mode #interior-feed {
+  display: none;
+}
+
+#interior-feed:hover,
+#interior-feed:focus-visible {
+  background: #3b5529;
+}
+
+@media (max-width: 700px) {
+  #interior-feed {
+    bottom: 150px;
+  }
+}

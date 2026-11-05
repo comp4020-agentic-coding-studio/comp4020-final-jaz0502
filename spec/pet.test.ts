@@ -82,11 +82,20 @@ describe("a pet for your own garden", () => {
 
     expect((await adopt(app, alice.gid, { kind: "cat", name: "Mochi" })).body.pet).toEqual({ kind: "cat", name: "Mochi" });
     await stream.waitFor((f) => f.event === "pet" && (f.data as PetState).pet?.name === "Mochi");
-    expect((await adopt(app, alice.gid, { kind: "rabbit", name: "Clover2" })).body.pet).toEqual({ kind: "rabbit", name: "Clover2" });
+    expect((await adopt(app, alice.gid, { kind: "rabbit", name: "clover" })).body.pet).toEqual({ kind: "rabbit", name: "Clover" });
 
     // It is kept: a new stream is told about it, and it is never taken back.
     const again = await join(app, alice.gid);
-    expect(frames(again)).toEqual([{ unlocked: true, pet: { kind: "rabbit", name: "Clover2" } }]);
+    expect(frames(again)).toEqual([{ unlocked: true, pet: { kind: "rabbit", name: "Clover" } }]);
+  });
+
+  it("keeps a name with its first letter a capital, whatever was typed", async () => {
+    const alice = newVisitor(app.url);
+    const stream = await join(app, alice.gid);
+    await unlockPet(app, alice, stream, 40);
+    expect((await adopt(app, alice.gid, { kind: "dog", name: "biscuit" })).body.pet).toEqual({ kind: "dog", name: "Biscuit" });
+    expect((await adopt(app, alice.gid, { kind: "dog", name: "mOCHI" })).body.pet).toEqual({ kind: "dog", name: "MOCHI" });
+    expect(frames(await join(app, alice.gid))).toEqual([{ unlocked: true, pet: { kind: "dog", name: "MOCHI" } }]);
   });
 
   it("turns away a kind or name that is not allowed, and never keeps it", async () => {
@@ -96,7 +105,7 @@ describe("a pet for your own garden", () => {
 
     expect((await adopt(app, alice.gid, { kind: "dragon", name: "Mochi" })).status).toBe(400);
     expect((await adopt(app, alice.gid, { name: "Mochi" })).status).toBe(400);
-    for (const name of ["", "Thirteenchars", "two words", "a=b", "a\nb", "<b>", "café", "\u{1F431}", "a-b", 7, null]) {
+    for (const name of ["", "Thirteenchars", "two words", "a=b", "a\nb", "<b>", "café", "\u{1F431}", "a-b", "Mochi2", "7", "a1", 7, null]) {
       expect((await adopt(app, alice.gid, { kind: "cat", name })).status, JSON.stringify(name)).toBe(400);
     }
     expect((await adopt(app, alice.gid, "not an object")).status).toBe(400);
@@ -178,6 +187,6 @@ describe("how many pets are kept", () => {
     expect(full.status).toBe(409);
     expect(full.body.error).toMatch(/can't keep any more pets/);
     // Alice can still rename hers.
-    expect((await adopt(app, alice.gid, { kind: "cat", name: "Mochi2" })).status).toBe(200);
+    expect((await adopt(app, alice.gid, { kind: "cat", name: "Mochii" })).status).toBe(200);
   });
 });

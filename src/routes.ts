@@ -9,7 +9,7 @@ import { allowAction, mayPlant, recordPlanting } from "./limits.ts";
 import { logEvent } from "./log.ts";
 import { renderPage } from "./page.ts";
 import { move as moveGardener, wave as waveGardener } from "./presence.ts";
-import { PET_KINDS, petKindOf, validPetName } from "./pets.ts";
+import { PET_KINDS, petKindOf, tidyPetName, validPetName } from "./pets.ts";
 import { renderReadme } from "./readme.ts";
 import { broadcastActivity, broadcastPresenceUpdate, broadcastUpdate, broadcastWave, sendDecorations, sendOwnUpdate, sendPet, sendSeeds, sendStats, subscribe } from "./realtime.ts";
 import { serveStatic } from "./static.ts";
@@ -140,7 +140,7 @@ const PET_PATH = "/api/own-garden/pet";
 
 const PET_REFUSALS: Record<string, string> = {
   "bad-kind": "There is no such pet.",
-  "bad-name": "A name is 1 to 12 letters or digits, with no spaces or other marks.",
+  "bad-name": "A name is 1 to 12 letters, with no digits, spaces or other marks.",
   locked: "You haven't unlocked a pet yet.",
   "too-many-gardeners": "The garden can't keep any more pets just now.",
 };
@@ -436,7 +436,7 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
     if (!kind) return refuse(400, "bad-kind");
     if (!validPetName(asked.name)) return refuse(400, "bad-name", { kind });
     if (!db.getPetState(who).unlocked) return refuse(409, "locked", { kind });
-    const kept = db.setPet(who, kind, asked.name);
+    const kept = db.setPet(who, kind, tidyPetName(asked.name));
     if (!kept.ok) return refuse(409, kept.reason, { kind });
 
     logEvent(who, "pet", { kind, result: "ok" });

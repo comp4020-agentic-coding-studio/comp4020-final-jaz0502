@@ -733,11 +733,11 @@ scene.background = new THREE.Color(0xbfe3f0);
 
 // Low enough, and aimed a little above the bed, that a strip of sky shows above
 // the horizon behind it.
-const CAMERA_TARGET = new THREE.Vector3(0, 0.7, 0);
+const CAMERA_TARGET = new THREE.Vector3(0, 1.5, 0);
 const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 160);
 // From outside the square, looking across Bed 1 towards the other beds, so they
 // show in the distance and can be hovered and clicked to go there.
-camera.position.set(-6.5, 4.2, 6.5);
+camera.position.set(-6.5, 3.1, 6.5);
 camera.lookAt(CAMERA_TARGET);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -2061,6 +2061,16 @@ const OWN_CENTRE = { x: -16, z: 6 };
 // From the middle of the bed to the middle of its edge row, and to its hedge.
 const OWN_HALF = ((OWN_COLS - 1) / 2) * SPACING;
 const OWN_HEDGE = OWN_HALF + 0.98;
+// The flat stones round your garden and in the path to it, where a pet can stand on one:
+// { x, z, r, top }, so it is lifted onto a stone instead of sinking into it.
+const petStones = [];
+function addPetStone(mesh) {
+  mesh.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(mesh);
+  const size = box.getSize(new THREE.Vector3());
+  const centre = box.getCenter(new THREE.Vector3());
+  petStones.push({ x: centre.x, z: centre.z, r: (size.x + size.z) * 0.25 + 0.04, top: box.max.y });
+}
 // position -> { group, soilMesh, plantGroup, ring, baseSoilColor }, like the shared plots
 const ownObjects = new Map();
 // position -> your latest own Plot from the server
@@ -2088,6 +2098,7 @@ scene.add(ownHedge);
     stone.rotation.y = seeded(i + 80) * Math.PI;
     stone.scale.setScalar(0.8 + seeded(i + 90) * 0.4);
     scene.add(stone);
+    addPetStone(stone);
   }
   for (let side = 0; side < 4; side++) {
     const steps = Math.round(OWN_HEDGE / 0.27);
@@ -3959,6 +3970,11 @@ async function handlePointerClick(event) {
     enterBarn();
     return;
   }
+  const cottage = cottageUnderPointer();
+  if (cottage && (!hit || cottage.distance < hit.distance) && (!cow || cottage.distance < cow.distance) && (!hen || cottage.distance < hen.distance) && (!barn || cottage.distance < barn.distance)) {
+    enterCottage();
+    return;
+  }
   if (cow && (!hit || cow.distance < hit.distance)) {
     feedCow(cow.cow);
     return;
@@ -4162,7 +4178,7 @@ renderer.domElement.addEventListener("pointermove", (event) => {
   // A cow can be given hay, so the pointer says so over one.
   const overCow = cowUnderPointer();
   const overHen = henUnderPointer();
-  const overBarn = barnUnderPointer();
+  const overBarn = barnUnderPointer() ?? cottageUnderPointer();
   renderer.domElement.style.cursor =
     (overCow && (!hit || overCow.distance < hit.distance)) || (overHen && (!hit || overHen.distance < hit.distance)) || (overBarn && (!hit || overBarn.distance < hit.distance)) ? "pointer" : "";
 
@@ -5526,15 +5542,43 @@ const PET_COLOURS = {
 };
 // How big each is drawn, and how long its legs are (so its paws meet the ground).
 const PET_SIZE = { cat: { scale: 1.25, baseY: 0.215 }, dog: { scale: 1.2, baseY: 0.273 }, rabbit: { scale: 1.45, baseY: 0.15 } };
-// The path it walks: along the front edge of the bed, then up the right one, in bed-local x,z.
-const PET_PATH = [[-1.8, 2.9], [2.9, 2.9], [2.9, -1.8]];
-const PET_PATH_LENGTH = 4.7 + 4.7;
+// The path it walks: along the front of the bed, in bed-local x,z. It keeps clear of the
+// hedge or fence behind it and of the garden lights at the corner and along the path in, so
+// it never walks through them.
+const PET_PATH_START = [-1.8, 3.12];
+const PET_PATH_LENGTH = 3.0;
 const PET_SPEED = 0.45;
+const PET_INDOOR_SCALE = 0.55;
+const PET_KEEP_OUT = 0.5; // how close you may come to your pet indoors
+
+// How high the ground is under a spot, in world units: the lawn, a stone you can step up
+// onto in the garden, or the planks and the rug in the cottage.
+function petFloorAt(x, z) {
+  if (petIndoors()) {
+    const d = Math.hypot(x - room.at.x, z - (room.at.z + 0.3));
+    const rug = d < 0.6 ? 0.055 : d < 0.95 ? 0.0475 : d < 1.35 ? 0.04 : d < 1.6 ? 0.0325 : 0.02;
+    return GROUND_Y + rug;
+  }
+  let top = GROUND_Y;
+  for (const stone of petStones) {
+    if (stone.top > top && Math.hypot(x - stone.x, z - stone.z) < stone.r) top = stone.top;
+  }
+  return top;
+}
+
+// Indoors the pet wanders along a line across the rug in front of the hearth.
+const petBox = new THREE.Box3();
+const petPoint3 = new THREE.Vector3();
+const PET_ROOM_LENGTH = 3;
+function petRoomPoint(distance) {
+  return [-1.5 + Math.min(Math.max(distance, 0), PET_ROOM_LENGTH), 1.1];
+}
+const petIndoors = () => interiorMode && room !== null && room.pet === true;
+const petLength = () => (petIndoors() ? PET_ROOM_LENGTH : PET_PATH_LENGTH);
+const petPoint = (distance) => (petIndoors() ? petRoomPoint(distance) : petPathPoint(distance));
 
 function petPathPoint(distance) {
-  const d = Math.min(Math.max(distance, 0), PET_PATH_LENGTH);
-  if (d <= 4.7) return [PET_PATH[0][0] + d, PET_PATH[0][1]];
-  return [PET_PATH[1][0], PET_PATH[1][1] - (d - 4.7)];
+  return [PET_PATH_START[0] + Math.min(Math.max(distance, 0), PET_PATH_LENGTH), PET_PATH_START[1]];
 }
 
 function buildPetModel(kind) {
@@ -5719,7 +5763,11 @@ function buildPetModel(kind) {
   const size = PET_SIZE[kind];
   group.scale.setScalar(size.scale);
   body.position.y = size.baseY;
-  return { kind, group, body, baseY: size.baseY, neck, head, ears, tails, legs, eyes, nose: noseMesh };
+  const meshes = [];
+  group.traverse((o) => {
+    if (o.isMesh) meshes.push(o);
+  });
+  return { kind, group, body, baseY: size.baseY, neck, head, ears, tails, legs, eyes, nose: noseMesh, meshes, lift: 0 };
 }
 
 // The name over its head, drawn as text on a canvas, never as page markup.
@@ -5779,6 +5827,12 @@ const petPanel = document.getElementById("own-pet");
 const petForm = document.getElementById("pet-form");
 const petKindsBox = document.getElementById("pet-kinds");
 const petNameInput = document.getElementById("pet-name");
+// Only letters go in, and the first is a capital, as you type. The server checks it all the same.
+petNameInput.addEventListener("input", () => {
+  const letters = petNameInput.value.replace(/[^A-Za-z]/g, "");
+  const tidy = letters.charAt(0).toUpperCase() + letters.slice(1);
+  if (tidy !== petNameInput.value) petNameInput.value = tidy;
+});
 const petNote = document.getElementById("pet-note");
 const petFeedButton = document.getElementById("pet-feed");
 const PET_KIND_LABEL = { cat: "Cat", dog: "Dog", rabbit: "Rabbit" };
@@ -6067,7 +6121,9 @@ function feedPet() {
   const forward = new THREE.Vector2(Math.cos(pet.heading), -Math.sin(pet.heading));
   const food = buildPetFood(pet.kind);
   const dist = FOOD_DIST[pet.kind];
-  food.group.position.set(pet.group.position.x + forward.x * dist, GROUND_Y, pet.group.position.z + forward.y * dist);
+  const dishX = pet.group.position.x + forward.x * dist;
+  const dishZ = pet.group.position.z + forward.y * dist;
+  food.group.position.set(dishX, petFloorAt(dishX, dishZ), dishZ);
   // The dish's own +x points the way the pet faces, so the near side is where it starts eating.
   food.group.rotation.y = pet.heading;
   scene.add(food.group);
@@ -6113,8 +6169,11 @@ function updatePetFrame() {
   const cycle = Math.floor(now / 8);
   if (cycle !== pet.cycle) {
     pet.cycle = cycle;
-    pet.target = seeded(cycle * 13.1 + 0.5) * PET_PATH_LENGTH;
+    pet.target = seeded(cycle * 13.1 + 0.5) * petLength();
   }
+  // Coming in from the garden, or going back out, it keeps to the line it has.
+  pet.distance = Math.min(pet.distance, petLength());
+  pet.target = Math.min(pet.target, petLength());
   const gap = pet.target - pet.distance;
   const moving = !pet.feed && !still && Math.abs(gap) > 0.03 ? 1 : 0;
 
@@ -6140,19 +6199,29 @@ function updatePetFrame() {
     pet.gaitT += dt * gait.rate;
     step = gait.speed * dt;
   }
+  if (step > 0 && petIndoors()) {
+    // It waits rather than walk through you.
+    const [nx, nz] = petPoint(pet.distance + Math.sign(gap) * 0.15);
+    const [cx, cz] = petPoint(pet.distance);
+    const near = Math.hypot(nx - walker.x, nz - walker.z);
+    if (near < PET_KEEP_OUT && near < Math.hypot(cx - walker.x, cz - walker.z)) step = 0;
+  }
   if (step > 0) {
     const dir = Math.sign(gap);
-    const here = petPathPoint(pet.distance);
-    const ahead = petPathPoint(pet.distance + dir * 0.1);
+    const here = petPoint(pet.distance);
+    const ahead = petPoint(pet.distance + dir * 0.1);
     if (ahead[0] !== here[0] || ahead[1] !== here[1]) {
       const goal = Math.atan2(-(ahead[1] - here[1]), ahead[0] - here[0]);
       pet.heading = lerpAngle(pet.heading, goal, Math.min(1, dt * 8));
     }
     pet.distance += dir * Math.min(step, Math.abs(gap));
   }
-  const [px, pz] = petPathPoint(pet.distance);
-  pet.group.position.set(OWN_CENTRE.x + px, GROUND_Y, OWN_CENTRE.z + pz);
+  const [px, pz] = petPoint(pet.distance);
+  const home = petIndoors() ? room.at : OWN_CENTRE;
+  pet.group.position.set(home.x + px, GROUND_Y, home.z + pz);
   pet.group.rotation.y = pet.heading;
+  // Next to your own figure in the cottage it is drawn smaller, so it sits in proportion.
+  pet.group.scale.setScalar(PET_SIZE[pet.kind].scale * (petIndoors() ? PET_INDOOR_SCALE : 1));
 
   // Legs.
   if (rabbit) {
@@ -6298,9 +6367,25 @@ function updatePetFrame() {
     }
   }
 
-  // Its name floats over it, but only while you are looking at your own garden.
-  pet.tag.visible = ownMode && !photoMode;
-  pet.tag.position.set(pet.group.position.x, GROUND_Y + 1.1, pet.group.position.z);
+  // Stand on whatever is underneath: no part of it may go below the ground at its own spot,
+  // whether a paw is on a stone, a rug is under it, or its head is down at the dish. It is
+  // eased, so it steps up onto a stone instead of jumping.
+  pet.group.position.y = GROUND_Y + pet.lift;
+  pet.group.updateMatrixWorld(true);
+  let deficit = -Infinity;
+  for (const mesh of pet.meshes) {
+    petBox.setFromObject(mesh);
+    petBox.getCenter(petPoint3);
+    deficit = Math.max(deficit, petFloorAt(petPoint3.x, petPoint3.z) - petBox.min.y);
+  }
+  const wanted = Math.max(0, pet.lift + deficit + 0.003);
+  pet.lift += (wanted - pet.lift) * Math.min(1, dt * (wanted > pet.lift ? 45 : 10));
+  pet.group.position.y = GROUND_Y + pet.lift;
+
+  // Its name floats over it, but only while you are looking at your own garden or the cottage.
+  pet.tag.visible = (ownMode || petIndoors()) && !photoMode;
+  pet.tag.position.set(pet.group.position.x, GROUND_Y + pet.lift + (petIndoors() ? 0.65 : 1.1), pet.group.position.z);
+  pet.tag.scale.set(petIndoors() ? 0.8 : 1.0, petIndoors() ? 0.2 : 0.25, 1);
 }
 
 // A barn for the cows, out on the lawn between two of their patches, facing the garden:
@@ -6472,7 +6557,7 @@ const barnIn = (() => {
   g.add(new THREE.AmbientLight(0xffe2b8, 0.9));
   const W = 10;
   const D = 14;
-  const H = 3.2;
+  const H = 4.6; // a tall barn, so the beams and loft feel big
   // Floor: planks down the aisle, packed earth either side, and loose straw in the stalls.
   g.add(box(W, 0.2, D, m.floor, 0, -0.1, 0));
   for (let i = 0; i < 9; i++) g.add(box(0.46, 0.02, D - 0.1, i % 2 ? m.floor : m.floorLight, -2.1 + i * 0.52, 0.01, 0));
@@ -6654,28 +6739,88 @@ const barnIn = (() => {
   });
   scene.add(g);
   const obstacles = [[-5.3, -2.25, -4.1, 5.1], [2.25, 5.3, -4.1, 5.1], [-5.3, -2.9, 5.9, 7.3], [3.3, 5.3, 5.2, 7.3]];
-  return { group: g, cows: stalledCows, doors, glass, glassDay, glassNight, shafts, halos, obstacles, bounds: { x: 4.65, zMin: -6.65, zMax: 6.65 } };
+  return {
+    id: "barn",
+    group: g,
+    at: INTERIOR_AT,
+    start: { x: 0, z: 3.8 },
+    bounds: { x0: -4.65, x1: 4.65, z0: -6.65, z1: 6.65 },
+    cows: stalledCows,
+    doors,
+    glass,
+    glassDay,
+    glassNight,
+    shafts,
+    halos,
+    obstacles,
+    pet: false,
+    follow: { back: 3.1, up: 1.2 },
+    title: "The barn",
+    note: "Only you can see in here. Walk with W A S D, turn with the arrow keys or by dragging, and click a cow to give it hay.",
+    welcome: "Inside the barn. Only you can see in here.",
+    doorHint: "Click the doors to go back outside",
+  };
 })();
 
 const interiorBar = document.getElementById("interior-bar");
 const interiorFade = document.getElementById("interior-fade");
 const interiorStick = document.getElementById("interior-stick");
 const interiorKnob = document.getElementById("interior-knob");
+const interiorTitle = document.getElementById("interior-title");
+const interiorNote = document.getElementById("interior-note");
+const interiorFeed = document.getElementById("interior-feed");
 let interiorMode = false;
 let interiorBusy = false;
 let interiorReturn = null;
-const walker = { x: 0, z: 5.5, yaw: 0, pitch: 0, bob: 0, last: 0 };
+let room = null; // the room you are in: barnIn or cottageIn
+const walker = { x: 0, z: 5.5, yaw: 0, pitch: 0, bob: 0, vf: 0, vs: 0, gait: 0, last: 0 };
 const walkKeys = new Set();
 const stick = { x: 0, y: 0, id: null };
-const INTERIOR_EYE = 1.55;
-const INTERIOR_FOV = 68;
+const INTERIOR_FOV = 60;
+// You are seen from behind and a little above, as a small figure in your own colour, like the
+// one outside but drawn only here and only for you. The camera follows it round the room.
+const FOLLOW_LOOK = 1.0;
+let roomFigure = null;
+function buildRoomFigure() {
+  const group = new THREE.Group();
+  const body = new THREE.Mesh(FIGURE_BODY, flatMaterial(colourFor(me ?? "00000000")));
+  body.position.y = 0.21;
+  const head = new THREE.Mesh(FIGURE_HEAD, baseSkinMaterial);
+  head.position.y = 0.54;
+  const brim = new THREE.Mesh(FIGURE_BRIM, baseStrawMaterial);
+  brim.position.y = 0.64;
+  const crown = new THREE.Mesh(FIGURE_CROWN, baseStrawMaterial);
+  crown.position.y = 0.7;
+  const shadow = new THREE.Mesh(FIGURE_SHADOW, baseShadowMaterial);
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.006;
+  group.add(body, head, brim, crown, shadow);
+  const arms = [-1, 1].map((side) => {
+    const pivot = new THREE.Group();
+    pivot.position.set(side * 0.13, 0.4, 0);
+    pivot.rotation.z = side * ARM_REST;
+    const sleeve = new THREE.Mesh(FIGURE_ARM, body.material);
+    const hand = new THREE.Mesh(FIGURE_HAND, baseSkinMaterial);
+    hand.position.y = -0.24;
+    pivot.add(sleeve, hand);
+    group.add(pivot);
+    return pivot;
+  });
+  group.scale.setScalar(1.15);
+  return { group, body, arms };
+}
 
 function barnUnderPointer() {
   const hit = raycaster.intersectObject(barnGroup, true)[0];
   return hit ? { distance: hit.distance } : null;
 }
 
-function enterBarn() {
+function cottageUnderPointer() {
+  const hit = raycaster.intersectObject(cottageGroup, true)[0];
+  return hit ? { distance: hit.distance } : null;
+}
+
+function enterRoom(target) {
   if (interiorMode || interiorBusy || photoMode || ownMode) return;
   interiorBusy = true;
   closePlotChoice();
@@ -6691,23 +6836,33 @@ function enterBarn() {
       fov: camera.fov,
     };
     glide = null;
+    room = target;
     interiorMode = true;
     document.body.classList.add("interior-mode");
+    interiorTitle.textContent = room.title;
+    interiorNote.textContent = room.note;
     interiorBar.hidden = false;
     interiorStick.hidden = !window.matchMedia("(pointer: coarse)").matches;
-    barnIn.group.visible = true;
+    room.group.visible = true;
+    if (roomFigure) {
+      roomFigure.group.parent?.remove(roomFigure.group);
+      roomFigure.body.material.dispose();
+    }
+    roomFigure = buildRoomFigure();
+    room.group.add(roomFigure.group);
     controls.enabled = false;
     camera.fov = INTERIOR_FOV;
     camera.updateProjectionMatrix();
-    camera.rotation.order = "YXZ";
-    Object.assign(walker, { x: 0, z: 5.4, yaw: 0, pitch: 0, bob: 0, last: performance.now() });
-    statusBar.textContent = "Inside the barn. Only you can see in here.";
+    Object.assign(walker, { x: room.start.x, z: room.start.z, yaw: 0, pitch: 0, bob: 0, vf: 0, vs: 0, gait: 0, last: performance.now() });
+    statusBar.textContent = room.welcome;
     interiorFade.classList.remove("on");
     setTimeout(() => (interiorBusy = false), 260);
   }, 260);
 }
+const enterBarn = () => enterRoom(barnIn);
+const enterCottage = () => enterRoom(cottageIn);
 
-function leaveBarn() {
+function leaveRoom() {
   if (!interiorMode || interiorBusy) return;
   interiorBusy = true;
   interiorFade.classList.add("on");
@@ -6719,10 +6874,13 @@ function leaveBarn() {
     document.body.classList.remove("interior-mode");
     interiorBar.hidden = true;
     interiorStick.hidden = true;
-    barnIn.group.visible = false;
+    room.group.remove(roomFigure.group);
+    roomFigure.body.material.dispose();
+    roomFigure = null;
+    room.group.visible = false;
+    room = null;
     camera.fov = interiorReturn.fov;
     camera.updateProjectionMatrix();
-    camera.rotation.order = "XYZ";
     camera.position.copy(interiorReturn.camera);
     controls.target.copy(interiorReturn.target);
     controls.enabled = true;
@@ -6734,11 +6892,19 @@ function leaveBarn() {
   }, 260);
 }
 
-function blockedInBarn(x, z) {
-  const b = barnIn.bounds;
-  if (Math.abs(x) > b.x || z < b.zMin || z > b.zMax) return true;
+function blockedInRoom(x, z) {
+  const b = room.bounds;
+  if (x < b.x0 || x > b.x1 || z < b.z0 || z > b.z1) return true;
+  // Your pet is in the way too, but if it has walked into you, you can still step away.
+  if (petIndoors() && petObj?.group) {
+    const px = petObj.group.position.x - room.at.x;
+    const pz = petObj.group.position.z - room.at.z;
+    const now = Math.hypot(walker.x - px, walker.z - pz);
+    const next = Math.hypot(x - px, z - pz);
+    if (next < PET_KEEP_OUT && next < now) return true;
+  }
   const r = 0.3;
-  return barnIn.obstacles.some(([x0, x1, z0, z1]) => x > x0 - r && x < x1 + r && z > z0 - r && z < z1 + r);
+  return room.obstacles.some(([x0, x1, z0, z1]) => x > x0 - r && x < x1 + r && z > z0 - r && z < z1 + r);
 }
 
 function updateInterior(now) {
@@ -6753,17 +6919,54 @@ function updateInterior(now) {
     fwd /= len;
     side /= len;
   }
-  if (!interiorBusy || interiorMode) {
+  // Speed eases up and down instead of jumping, and the stride grows with it, so setting off
+  // starts with a step rather than a slide.
+  const want = !interiorBusy || interiorMode ? 1 : 0;
+  const ease = 1 - Math.exp(-dt * 9);
+  walker.vf += (fwd * want - walker.vf) * ease;
+  walker.vs += (side * want - walker.vs) * ease;
+  const pace = Math.hypot(walker.vf, walker.vs);
+  walker.gait += (Math.min(1, pace * 1.6) - walker.gait) * (1 - Math.exp(-dt * 14));
+  {
     const speed = 2.4;
-    const dx = (-Math.sin(walker.yaw) * fwd + Math.cos(walker.yaw) * side) * speed * dt;
-    const dz = (-Math.cos(walker.yaw) * fwd - Math.sin(walker.yaw) * side) * speed * dt;
-    if (!blockedInBarn(walker.x + dx, walker.z)) walker.x += dx;
-    if (!blockedInBarn(walker.x, walker.z + dz)) walker.z += dz;
-    if (len > 0.05) walker.bob += dt * 8;
+    const dx = (-Math.sin(walker.yaw) * walker.vf + Math.cos(walker.yaw) * walker.vs) * speed * dt;
+    const dz = (-Math.cos(walker.yaw) * walker.vf - Math.sin(walker.yaw) * walker.vs) * speed * dt;
+    if (!blockedInRoom(walker.x + dx, walker.z)) walker.x += dx;
+    if (!blockedInRoom(walker.x, walker.z + dz)) walker.z += dz;
+    walker.bob += dt * (3 + 6 * Math.min(1, pace));
   }
-  camera.position.set(INTERIOR_AT.x + walker.x, GROUND_Y + INTERIOR_EYE + Math.sin(walker.bob) * 0.025, INTERIOR_AT.z + walker.z);
-  camera.rotation.set(walker.pitch, walker.yaw, 0);
+  // Your figure walks about the room, turned the way it is going, with a little bounce and
+  // swing of its arms.
+  const f = roomFigure;
+  const step = Math.sin(walker.bob) * walker.gait;
+  f.group.position.set(walker.x, Math.abs(step) * 0.05 + (petIndoors() ? petFloorAt(room.at.x + walker.x, room.at.z + walker.z) - GROUND_Y : 0), walker.z);
+  f.group.rotation.y = walker.yaw + Math.PI;
+  f.body.rotation.z = step * 0.08;
+  f.arms[0].rotation.z = -ARM_REST - step * 0.35;
+  f.arms[1].rotation.z = ARM_REST - step * 0.35;
 
+  // The camera stays behind and above you, looking at you, and never goes through a wall: if
+  // the room is in the way it comes in closer.
+  const behind = new THREE.Vector3(Math.sin(walker.yaw), 0, Math.cos(walker.yaw));
+  let back = room.follow.back * Math.cos(Math.max(walker.pitch, -0.3) * 0.5);
+  for (let k = 0; k < 12; k++) {
+    const cx = walker.x + behind.x * back;
+    const cz = walker.z + behind.z * back;
+    const b = room.bounds;
+    const inside = cx > b.x0 - 0.15 && cx < b.x1 + 0.15 && cz > b.z0 - 0.15 && cz < b.z1 + 0.15;
+    const inFurniture = room.obstacles.some(([x0, x1, z0, z1]) => cx > x0 - 0.2 && cx < x1 + 0.2 && cz > z0 - 0.2 && cz < z1 + 0.2);
+    if (inside && !inFurniture) break;
+    back *= 0.85;
+  }
+  const lift = room.follow.up + walker.pitch * 1.2;
+  camera.position.set(room.at.x + walker.x + behind.x * back, GROUND_Y + Math.max(0.5, lift), room.at.z + walker.z + behind.z * back);
+  camera.lookAt(room.at.x + walker.x, GROUND_Y + FOLLOW_LOOK, room.at.z + walker.z);
+
+  interiorFeed.hidden = !(room.pet && petObj);
+  room.update(now);
+}
+
+barnIn.update = (now) => {
   // The light: windows and shafts follow the sky, the lanterns the dark.
   barnIn.glass.color.copy(barnIn.glassNight).lerp(barnIn.glassDay, dayness);
   const sun = dayness * (1 - 0.8 * weatherNow.cloud);
@@ -6778,7 +6981,7 @@ function updateInterior(now) {
     if (cow.feed) updateStallFeeding(cow, t);
     else cow.head.rotation.z = 0.08 + Math.sin(t * 0.8 + cow.index) * 0.03;
   }
-}
+};
 
 const STALL_EAT_S = 4;
 function feedStalledCow(cow) {
@@ -6843,30 +7046,37 @@ function stalledCowUnderPointer() {
   return cow ? { cow, distance: hit.distance } : null;
 }
 
-// A click in the barn: a cow gets hay, the doors take you out, and nothing else happens.
+barnIn.pick = () => {
+  const cow = stalledCowUnderPointer();
+  return cow ? { distance: cow.distance, label: "Click to give the cow some hay", act: () => feedStalledCow(cow.cow) } : null;
+};
+
+// A click in a room: the door takes you out, what is in front of you gets its care, and
+// nothing else happens.
 function interiorClick(event) {
   raycaster.setFromCamera(ndcFromEvent(event), camera);
-  const cow = stalledCowUnderPointer();
-  const door = raycaster.intersectObjects(barnIn.doors, false)[0];
-  if (door && (!cow || door.distance < cow.distance)) {
-    leaveBarn();
+  const pick = room.pick();
+  const door = raycaster.intersectObjects(room.doors, false)[0];
+  if (door && (!pick || door.distance < pick.distance)) {
+    leaveRoom();
     return;
   }
-  if (cow) feedStalledCow(cow.cow);
+  if (pick) pick.act();
 }
 
 function interiorPointerMove(event) {
   if (interiorLook && event.buttons & 1) {
     walker.yaw -= (event.clientX - interiorLook.x) * 0.005;
-    walker.pitch = Math.max(-1.1, Math.min(1.1, walker.pitch - (event.clientY - interiorLook.y) * 0.005));
+    walker.pitch = Math.max(-0.4, Math.min(0.8, walker.pitch + (event.clientY - interiorLook.y) * 0.004));
     interiorLook = { x: event.clientX, y: event.clientY };
     return;
   }
   raycaster.setFromCamera(ndcFromEvent(event), camera);
-  const cow = stalledCowUnderPointer();
-  const door = raycaster.intersectObjects(barnIn.doors, false)[0];
-  renderer.domElement.style.cursor = cow || door ? "pointer" : "";
-  statusBar.textContent = door && (!cow || door.distance < cow.distance) ? "Click the doors to go back outside" : cow ? "Click to give the cow some hay" : "Inside the barn. Only you can see in here.";
+  const pick = room.pick();
+  const door = raycaster.intersectObjects(room.doors, false)[0];
+  const atDoor = door && (!pick || door.distance < pick.distance);
+  renderer.domElement.style.cursor = pick || door ? "pointer" : "";
+  statusBar.textContent = atDoor ? room.doorHint : pick ? pick.label : room.welcome;
 }
 
 let interiorLook = null;
@@ -6878,7 +7088,7 @@ window.addEventListener("pointerup", () => (interiorLook = null));
 document.addEventListener("keydown", (event) => {
   if (!interiorMode || photoMode || event.target instanceof HTMLInputElement || event.metaKey || event.ctrlKey || event.altKey) return;
   if (event.key === "Escape") {
-    leaveBarn();
+    leaveRoom();
     return;
   }
   if (["KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.code)) {
@@ -6888,8 +7098,10 @@ document.addEventListener("keydown", (event) => {
 });
 document.addEventListener("keyup", (event) => walkKeys.delete(event.code));
 window.addEventListener("blur", () => walkKeys.clear());
-document.getElementById("interior-back").addEventListener("click", leaveBarn);
+document.getElementById("interior-back").addEventListener("click", leaveRoom);
 document.getElementById("barn-sign").addEventListener("click", enterBarn);
+document.getElementById("cottage-sign").addEventListener("click", enterCottage);
+interiorFeed.addEventListener("click", feedPet);
 
 // The stick for a touch screen: how far it is pushed is how fast you walk.
 function moveStick(event) {
@@ -6923,20 +7135,391 @@ const endStick = (event) => {
 interiorStick.addEventListener("pointerup", endStick);
 interiorStick.addEventListener("pointercancel", endStick);
 
-// The sign over the barn follows it on screen, as the others do.
-const barnSign = document.getElementById("barn-sign");
-const barnSignPoint = new THREE.Vector3();
-function updateBarnSign() {
+// The signs over the barn and the cottage follow them on screen, as the others do.
+const roomSigns = [
+  { el: document.getElementById("barn-sign"), at: () => BARN_AT, y: 5.4 },
+  { el: document.getElementById("cottage-sign"), at: () => COTTAGE_AT, y: 5.6 },
+];
+const roomSignPoint = new THREE.Vector3();
+function updateRoomSigns() {
   const rect = renderer.domElement.getBoundingClientRect();
-  barnSignPoint.set(BARN_AT.x, 5.4, BARN_AT.z).project(camera);
-  const x = rect.left + ((barnSignPoint.x + 1) / 2) * rect.width;
-  const y = rect.top + ((1 - barnSignPoint.y) / 2) * rect.height;
-  const visible = !ownMode && !interiorMode && !glide && !photoMode && barnSignPoint.z < 1 && x > rect.left && x < rect.right && y > rect.top && y < rect.bottom;
-  if (barnSign.hidden === visible) barnSign.hidden = !visible;
-  if (!visible) return;
-  barnSign.style.left = `${x}px`;
-  barnSign.style.top = `${y}px`;
+  for (const sign of roomSigns) {
+    const at = sign.at();
+    roomSignPoint.set(at.x, sign.y, at.z).project(camera);
+    const x = rect.left + ((roomSignPoint.x + 1) / 2) * rect.width;
+    let y = rect.top + ((1 - roomSignPoint.y) / 2) * rect.height;
+    const visible = !ownMode && !interiorMode && !glide && !photoMode && roomSignPoint.z < 1 && x > rect.left && x < rect.right && y > rect.top && y < rect.bottom;
+    if (sign.el.hidden === visible) sign.el.hidden = !visible;
+    if (!visible) continue;
+    sign.el.style.left = `${x}px`;
+    sign.el.style.top = `${y}px`;
+  }
 }
+
+// Inside the cottage: one cosy room, far off from the garden like the barn's. It is a private
+// view in the same way: nothing is sent, stored, counted or logged, there are no gardeners'
+// figures in it, and nothing in the garden depends on being inside. If you have a pet, it is
+// here with you (the same pet, drawn in your own page), and you can stroke it or feed it.
+const COTTAGE_IN_AT = { x: 400, z: 400 };
+const cottageIn = (() => {
+  const g = new THREE.Group();
+  g.position.set(COTTAGE_IN_AT.x, GROUND_Y, COTTAGE_IN_AT.z);
+  g.visible = false;
+  const m = {
+    floor: interiorMat(0x9a7448),
+    floorLight: interiorMat(0xa98255),
+    wall: interiorMat(0xfdf1dc, 0.5),
+    stone: interiorMat(0xb8a999, 0.4),
+    stoneDark: interiorMat(0x7d7066, 0.3),
+    wood: interiorMat(0x7a5230),
+    woodLight: interiorMat(0xa87a4e),
+    beam: interiorMat(0x5e3f26),
+    thatch: interiorMat(0xc99a45, 0.5),
+    thatchDark: interiorMat(0xb8873a, 0.5),
+    door: interiorMat(0x5fb0a4, 0.4),
+    trim: interiorMat(0xfffaf0, 0.5),
+    gold: interiorMat(0xf2c14e, 0.6),
+    pink: interiorMat(0xec8fab, 0.5),
+    mint: interiorMat(0x93d4b8, 0.5),
+    cream: interiorMat(0xf6e7c8, 0.5),
+    blue: interiorMat(0x7aa6d6, 0.5),
+    red: interiorMat(0xd9534f, 0.5),
+    yellow: interiorMat(0xf2c94c, 0.5),
+    leaf: interiorMat(0x4f8a46, 0.5),
+    dark: interiorMat(0x241c18, 0.1),
+    clay: interiorMat(0xc8744a, 0.4),
+    fireBase: new THREE.MeshBasicMaterial({ color: 0xff8a2a }),
+    fireTip: new THREE.MeshBasicMaterial({ color: 0xffd860 }),
+    ember: new THREE.MeshBasicMaterial({ color: 0xc23b14 }),
+  };
+  m.thatch.side = m.thatchDark.side = THREE.DoubleSide;
+  g.add(new THREE.AmbientLight(0xffe2b8, 0.9));
+  const W = 4.4; // half the width
+  const D = 3.4; // half the depth
+  const H = 3.2; // wall height, high enough to feel airy
+  const RIDGE = 1.1;
+  const place = (mesh, x, y, z) => {
+    mesh.position.set(x, y, z);
+    g.add(mesh);
+    return mesh;
+  };
+  const cyl = (rt, rb, h, material, x, y, z, seg = 14) => place(new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), material), x, y, z);
+  const ball = (rx, ry, rz, material, x, y, z) => place(cowBlob(rx, ry, rz, material), x, y, z);
+
+  // Floor, in boards, and a round rug of three rings.
+  g.add(box(W * 2, 0.2, D * 2, m.floor, 0, -0.1, 0));
+  const boards = 16;
+  for (let i = 0; i < boards; i++) g.add(box((W * 2) / boards - 0.02, 0.02, D * 2 - 0.1, i % 2 ? m.floor : m.floorLight, -W + (W / boards) + i * ((W * 2) / boards), 0.01, 0));
+  cyl(1.6, 1.6, 0.025, m.cream, 0, 0.02, 0.3, 28);
+  cyl(1.35, 1.35, 0.03, m.pink, 0, 0.025, 0.3, 28);
+  cyl(0.95, 0.95, 0.035, m.cream, 0, 0.03, 0.3, 28);
+  cyl(0.6, 0.6, 0.04, m.mint, 0, 0.035, 0.3, 28);
+
+  // Walls, thickened outwards, and a gable above the front and the back.
+  g.add(box(0.2, H, D * 2, m.wall, -W - 0.1, H / 2, 0));
+  g.add(box(0.2, H, D * 2, m.wall, W + 0.1, H / 2, 0));
+  g.add(box(W * 2 + 0.4, H, 0.2, m.wall, 0, H / 2, -D - 0.1));
+  const front = (w, h, x, y) => g.add(box(w, h, 0.2, m.wall, x, y, D + 0.1));
+  front(W - 0.55, H, -(W + 0.55) / 2, H / 2);
+  front(W - 0.55, H, (W + 0.55) / 2, H / 2);
+  front(1.1, H - 1.9, 0, 1.9 + (H - 1.9) / 2);
+  const gable = new THREE.Shape([new THREE.Vector2(-W - 0.2, 0), new THREE.Vector2(W + 0.2, 0), new THREE.Vector2(0, RIDGE)]);
+  for (const z of [-D, D]) {
+    const end = new THREE.Mesh(new THREE.ShapeGeometry(gable), interiorMat(0xfdf1dc, 0.5));
+    end.material.side = THREE.DoubleSide;
+    place(end, 0, H, z);
+  }
+  // A baseboard and a stripe of wainscot round the walls.
+  for (const side of [-1, 1]) {
+    g.add(box(0.05, 0.14, D * 2, m.woodLight, side * (W - 0.02), 0.07, 0));
+    g.add(box(0.06, 0.05, D * 2, m.woodLight, side * (W - 0.02), 0.95, 0));
+  }
+  g.add(box(W * 2, 0.14, 0.05, m.woodLight, 0, 0.07, -D + 0.02));
+  g.add(box(W * 2, 0.05, 0.06, m.woodLight, 0, 0.95, -D + 0.02));
+
+  // The thatch seen from underneath, with beams across.
+  // Each half rises from the eave to the ridge; they overlap at the top and overhang the
+  // walls, and a plain dark shell round the whole room means no sky shows at any edge.
+  for (const side of [1, -1]) {
+    const run = W + 0.5;
+    const len = Math.hypot(run, RIDGE) + 0.4;
+    const slab = box(len, 0.2, D * 2 + 0.6, side > 0 ? m.thatch : m.thatchDark, side * (run / 2), H + RIDGE / 2 - 0.02, 0);
+    slab.rotation.z = -side * Math.atan2(RIDGE, run);
+    g.add(slab);
+  }
+  const shell = new THREE.Mesh(new THREE.BoxGeometry(W * 2 + 1.6, H + RIDGE + 1.2, D * 2 + 1.6), new THREE.MeshBasicMaterial({ color: 0x3a2a1c, side: THREE.BackSide }));
+  shell.position.set(0, (H + RIDGE + 1.2) / 2 - 0.4, 0);
+  g.add(shell);
+  for (const z of [-D + 0.9, 0, D - 0.9]) {
+    g.add(box(W * 2 + 0.2, 0.18, 0.2, m.beam, 0, H - 0.05, z));
+    for (const side of [-1, 1]) {
+      const brace = box(0.9, 0.1, 0.12, m.beam, side * (W - 0.65), H - 0.4, z);
+      brace.rotation.z = side * 0.8;
+      g.add(brace);
+    }
+  }
+  g.add(box(0.18, 0.18, D * 2, m.beam, 0, H + RIDGE - 0.12, 0));
+  // Herbs and onions hung from the middle beam.
+  for (let k = 0; k < 6; k++) {
+    const x = -1.2 + k * 0.48;
+    g.add(box(0.015, 0.34, 0.015, m.dark, x, H - 0.3, 0));
+    ball(0.07, 0.1, 0.07, k % 2 ? m.leaf : m.clay, x, H - 0.52, 0);
+  }
+
+  // The door: round at the top, with a golden knob. It is the way out.
+  const doors = [];
+  const leaf = place(new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.4, 0.08), m.door), 0, 0.7, D - 0.02);
+  const top = place(new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.08, 18, 1, false, Math.PI / 2, Math.PI), m.door), 0, 1.4, D - 0.02);
+  top.rotation.x = Math.PI / 2;
+  doors.push(leaf, top);
+  doors.push(ball(0.045, 0.045, 0.045, m.gold, 0.32, 0.95, D - 0.1));
+  // The frame follows the door: two posts up to the springing of the arch, then a half ring
+  // over the round top.
+  for (const x of [-0.53, 0.53]) g.add(box(0.07, 1.4, 0.1, m.trim, x, 0.7, D + 0.01));
+  const arch = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.57, 24, 1, 0, Math.PI), m.trim);
+  arch.material = m.trim.clone();
+  arch.material.side = THREE.DoubleSide;
+  place(arch, 0, 1.4, D - 0.03);
+  // The wall closes the corners either side of the curve.
+  const spandrel = new THREE.Shape([new THREE.Vector2(-0.55, 0), new THREE.Vector2(0.55, 0), new THREE.Vector2(0.55, 0.55), new THREE.Vector2(-0.55, 0.55)]);
+  const hole = new THREE.Path();
+  hole.absarc(0, 0, 0.5, 0, Math.PI, false);
+  hole.lineTo(0.5, 0);
+  spandrel.holes.push(hole);
+  const fill = new THREE.Mesh(new THREE.ShapeGeometry(spandrel, 24), interiorMat(0xfdf1dc, 0.5));
+  fill.material.side = THREE.DoubleSide;
+  place(fill, 0, 1.4, D - 0.005);
+
+  // A window each side of the door, like the cottage outside, with a flower box. The glass
+  // follows the sky like the others.
+  const glass = new THREE.MeshBasicMaterial({ color: 0xcfe8f5 });
+  const glassDay = new THREE.Color(0xcfe8f5);
+  const glassNight = new THREE.Color(0x1d2744);
+  for (const wx of [-2.2, 2.2]) {
+    g.add(box(1.0, 1.0, 0.07, m.trim, wx, 1.5, D - 0.035));
+    g.add(box(0.8, 0.8, 0.08, glass, wx, 1.5, D - 0.04));
+    g.add(box(0.9, 0.05, 0.09, m.trim, wx, 1.5, D - 0.05));
+    g.add(box(0.05, 0.9, 0.09, m.trim, wx, 1.5, D - 0.05));
+    g.add(box(1.1, 0.06, 0.2, m.woodLight, wx, 0.97, D - 0.1));
+    for (const [dx, c] of [[-0.3, m.pink], [0, m.yellow], [0.3, m.red]]) ball(0.07, 0.09, 0.07, c, wx + dx, 1.06, D - 0.14);
+  }
+
+  // The hearth on the back wall: a stone chimney breast, a mantel, and a fire that flickers.
+  g.add(box(1.7, 1.3, 0.55, m.stone, 0, 0.65, -D + 0.28));
+  g.add(box(1.25, H - 1.3, 0.4, m.stone, 0, 1.3 + (H - 1.3) / 2, -D + 0.2));
+  g.add(box(0.95, 0.75, 0.1, m.dark, 0, 0.5, -D + 0.56));
+  g.add(box(0.95, 0.06, 0.2, m.stoneDark, 0, 0.1, -D + 0.62));
+  g.add(box(2.0, 0.09, 0.62, m.woodLight, 0, 1.36, -D + 0.32));
+  for (const dx of [-0.8, 0.8]) g.add(box(0.1, 0.1, 0.1, m.beam, dx, 1.27, -D + 0.5));
+  for (const [dx, h] of [[-0.55, 0.16], [-0.35, 0.1], [0.5, 0.2]]) {
+    g.add(box(0.06, h, 0.06, m.cream, dx, 1.41 + h / 2, -D + 0.4)); // candles on the mantel
+    g.add(ball(0.025, 0.04, 0.025, m.fireTip, dx, 1.43 + h, -D + 0.4));
+  }
+  for (const dx of [-0.25, 0.1]) g.add(box(0.5, 0.1, 0.1, m.beam, dx, 0.18, -D + 0.6)); // logs
+  const flames = [];
+  for (const [dx, h, color] of [[-0.18, 0.5, m.fireBase], [0.02, 0.62, m.fireTip], [0.2, 0.44, m.fireBase]]) {
+    const flame = place(new THREE.Mesh(new THREE.ConeGeometry(0.13, h, 7), color), dx, 0.22 + h / 2, -D + 0.58);
+    flame.userData.h = h;
+    flames.push(flame);
+  }
+  place(new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.3, 6), m.fireTip), 0.02, 0.37, -D + 0.6);
+  const halos = [];
+  const halo = (x, y, z, size, opacity) => {
+    const h = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: 0xffc060, transparent: true, opacity, depthWrite: false, blending: THREE.AdditiveBlending }));
+    h.scale.setScalar(size);
+    h.position.set(x, y, z);
+    g.add(h);
+    return h;
+  };
+  const fireGlow = halo(0, 0.6, -D + 0.9, 3.2, 0.5);
+
+  // A round table with a teapot, two cups and a bowl of fruit, and two stools.
+  const TABLE = { x: -2.9, z: -0.8 };
+  cyl(0.6, 0.6, 0.06, m.woodLight, TABLE.x, 0.74, TABLE.z, 20);
+  cyl(0.07, 0.1, 0.72, m.wood, TABLE.x, 0.36, TABLE.z, 8);
+  cyl(0.3, 0.3, 0.04, m.wood, TABLE.x, 0.03, TABLE.z, 12);
+  for (const [dx, dz] of [[0.95, 0], [0, 0.85], [0.1, -0.85]]) {
+    cyl(0.22, 0.22, 0.05, m.wood, TABLE.x + dx, 0.42, TABLE.z + dz, 12);
+    for (const [lx, lz] of [[-0.12, -0.12], [0.12, -0.12], [-0.12, 0.12], [0.12, 0.12]]) g.add(box(0.04, 0.4, 0.04, m.wood, TABLE.x + dx + lx, 0.2, TABLE.z + dz + lz));
+  }
+  ball(0.13, 0.11, 0.13, m.mint, TABLE.x - 0.1, 0.9, TABLE.z + 0.05); // teapot
+  ball(0.05, 0.04, 0.04, m.mint, TABLE.x + 0.03, 0.9, TABLE.z + 0.07);
+  g.add(box(0.03, 0.1, 0.03, m.mint, TABLE.x - 0.1, 1.03, TABLE.z + 0.05));
+  for (const [dx, dz] of [[0.25, 0.15], [0.22, -0.2]]) {
+    cyl(0.05, 0.04, 0.06, m.cream, TABLE.x + dx, 0.8, TABLE.z + dz, 10);
+  }
+  cyl(0.13, 0.09, 0.07, m.clay, TABLE.x - 0.25, 0.8, TABLE.z - 0.25, 10);
+  for (const [dx, dz, c] of [[-0.28, -0.25, m.red], [-0.22, -0.28, m.yellow], [-0.24, -0.2, m.red]]) ball(0.04, 0.04, 0.04, c, TABLE.x + dx, 0.87, TABLE.z + dz);
+  halos.push(halo(TABLE.x, 1.0, TABLE.z, 0.7, 0));
+
+  // A bed against the right-hand wall, with a patchwork quilt and two pillows.
+  const BED = { x: W - 0.75, z: -D + 1.15 };
+  g.add(box(1.4, 0.3, 2.3, m.wood, BED.x, 0.25, BED.z));
+  g.add(box(1.3, 0.2, 2.2, m.cream, BED.x, 0.5, BED.z));
+  g.add(box(1.5, 0.95, 0.1, m.wood, BED.x, 0.6, -D + 0.07));
+  g.add(box(1.5, 0.45, 0.1, m.wood, BED.x, 0.3, BED.z + 1.2));
+  for (let i = 0; i < 4; i++) for (let j = 0; j < 5; j++) {
+    const c = [m.pink, m.mint, m.yellow, m.blue, m.cream][(i * 2 + j * 3) % 5];
+    g.add(box(0.31, 0.04, 0.3, c, BED.x - 0.48 + i * 0.32, 0.62, BED.z - 0.55 + j * 0.31 + 0.3));
+  }
+  ball(0.28, 0.08, 0.16, m.trim, BED.x - 0.3, 0.64, -D + 0.38);
+  ball(0.28, 0.08, 0.16, m.pink, BED.x + 0.3, 0.64, -D + 0.38);
+
+  // An open bookcase on the left wall, a frame with a back and four shelves, full of books,
+  // with jars and a plant on top.
+  const SHELF = { x: -W + 0.2, z: 1.9 };
+  g.add(box(0.05, 2.0, 1.3, m.wood, -W + 0.05, 1.0, SHELF.z)); // back
+  for (const dz of [-0.65, 0.65]) g.add(box(0.34, 2.0, 0.06, m.wood, SHELF.x + 0.02, 1.0, SHELF.z + dz)); // sides
+  g.add(box(0.36, 0.06, 1.36, m.wood, SHELF.x + 0.02, 2.0, SHELF.z)); // top
+  const bookColours = [m.red, m.blue, m.yellow, m.mint, m.pink, m.clay, m.leaf];
+  for (const y of [0.04, 0.5, 0.95, 1.4, 1.85]) {
+    g.add(box(0.32, 0.04, 1.24, m.woodLight, SHELF.x + 0.02, y + 0.02, SHELF.z));
+    if (y > 1.8) continue;
+    let z = -0.58;
+    for (let k = 0; z < 0.52; k++) {
+      const w = 0.07 + seeded(k * 3 + y * 10) * 0.05;
+      const h = 0.26 + seeded(k * 7 + y * 5) * 0.14;
+      if (seeded(k * 11 + y * 3) < 0.12) { z += 0.12; continue; } // a gap, so it looks lived in
+      g.add(box(0.22, h, w, bookColours[(k + Math.floor(y * 10)) % 7], SHELF.x + 0.05, y + 0.04 + h / 2, SHELF.z + z + w / 2));
+      z += w + 0.01;
+    }
+  }
+  cyl(0.08, 0.06, 0.12, m.clay, SHELF.x + 0.05, 2.09, SHELF.z - 0.3, 8);
+  ball(0.12, 0.14, 0.12, m.leaf, SHELF.x + 0.05, 2.23, SHELF.z - 0.3);
+  cyl(0.06, 0.06, 0.16, m.trim, SHELF.x + 0.05, 2.11, SHELF.z + 0.25, 8);
+
+  // A basket with a blanket in it, by the fire, for the pet.
+  const BASKET = { x: 1.15, z: -D + 0.6 };
+  cyl(0.38, 0.32, 0.18, m.woodLight, BASKET.x, 0.09, BASKET.z, 14);
+  cyl(0.3, 0.3, 0.02, m.pink, BASKET.x, 0.14, BASKET.z, 14);
+  ball(0.2, 0.04, 0.2, m.cream, BASKET.x, 0.17, BASKET.z);
+
+  // Large paintings and other things on the walls. Each is a framed scene made of a few flat
+  // shapes, hung on a wall by turning it to face into the room.
+  const painting = (w, h, sky, hill, hill2, x, y, z, turn) => {
+    const pg = new THREE.Group();
+    const add = (mesh, px, py, pz) => { mesh.position.set(px, py, pz); pg.add(mesh); return mesh; };
+    add(new THREE.Mesh(new THREE.BoxGeometry(w + 0.16, h + 0.16, 0.06), m.wood), 0, 0, 0);
+    add(new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.07), sky), 0, 0, 0.005);
+    add(new THREE.Mesh(new THREE.BoxGeometry(w, h * 0.38, 0.08), hill2), 0, -h * 0.31, 0.01);
+    add(new THREE.Mesh(new THREE.BoxGeometry(w * 0.6, h * 0.26, 0.09), hill), -w * 0.18, -h * 0.25, 0.015);
+    add(cowBlob(w * 0.07, w * 0.07, 0.02, m.yellow), w * 0.28, h * 0.25, 0.05);
+    add(new THREE.Mesh(new THREE.BoxGeometry(0.04, h * 0.2, 0.1), m.wood), w * 0.12, -h * 0.12, 0.06);
+    add(cowBlob(w * 0.07, w * 0.08, 0.03, m.leaf), w * 0.12, -h * 0.01, 0.07);
+    pg.position.set(x, y, z);
+    pg.rotation.y = turn;
+    g.add(pg);
+  };
+  painting(1.7, 1.1, m.blue, m.leaf, m.mint, -2.6, 1.85, -D + 0.06, 0);
+  painting(1.1, 0.8, m.pink, m.yellow, m.clay, 1.95, 1.9, -D + 0.06, 0);
+  painting(1.0, 0.7, m.mint, m.leaf, m.stoneDark, -W + 0.06, 1.8, -2.5, Math.PI / 2);
+  painting(0.9, 0.6, m.cream, m.pink, m.red, -W + 0.06, 1.8, 0.45, Math.PI / 2);
+  painting(0.8, 0.55, m.yellow, m.mint, m.leaf, -W + 0.06, 1.8, 3.0, Math.PI / 2);
+  // A woven hanging by the bed, and a round clock over the door.
+  for (let i = 0; i < 5; i++) g.add(box(1.0 - i * 0.12, 0.22, 0.04, [m.pink, m.cream, m.mint, m.yellow, m.blue][i], 2.0, 2.35 - i * 0.22, -D + 0.05));
+  g.add(box(1.1, 0.04, 0.05, m.wood, 2.0, 2.5, -D + 0.05));
+  cyl(0.26, 0.26, 0.05, m.wood, 0, 2.75, D - 0.05, 20).rotation.x = Math.PI / 2;
+  cyl(0.21, 0.21, 0.06, m.trim, 0, 2.75, D - 0.07, 20).rotation.x = Math.PI / 2;
+  g.add(box(0.025, 0.15, 0.02, m.dark, 0, 2.81, D - 0.11));
+  g.add(box(0.1, 0.025, 0.02, m.dark, 0.04, 2.75, D - 0.11));
+  // Pot plants in two corners and a coat rack by the door.
+  for (const [px, pz] of [[-W + 0.55, D - 0.55], [-W + 0.55, -D + 0.6]]) {
+    cyl(0.2, 0.15, 0.3, m.clay, px, 0.15, pz, 10);
+    ball(0.3, 0.38, 0.3, m.leaf, px, 0.62, pz);
+    ball(0.2, 0.25, 0.2, m.leaf, px + 0.12, 0.98, pz - 0.05);
+  }
+  g.add(box(0.7, 0.06, 0.05, m.wood, 1.2, 1.7, D - 0.05));
+  for (const hx of [0.95, 1.2, 1.45]) g.add(ball(0.035, 0.035, 0.035, m.gold, hx, 1.66, D - 0.1));
+  ball(0.17, 0.2, 0.06, m.red, 0.95, 1.5, D - 0.12); // a coat
+  // A woven basket of logs by the hearth.
+  cyl(0.25, 0.22, 0.28, m.woodLight, -1.7, 0.14, -D + 0.5, 12);
+  for (const [dx, dy] of [[-0.08, 0.3], [0.08, 0.3], [0, 0.38]]) cyl(0.07, 0.07, 0.4, m.beam, -1.7 + dx, dy, -D + 0.5, 8).rotation.z = Math.PI / 2;
+
+  // Two windows, with flower boxes: one over the table, one by the bed. The light by day.
+  const shafts = [];
+  for (const [side, z] of [[-1, -0.8], [1, 1.9]]) {
+    const x = side * (W - 0.02);
+    g.add(box(0.07, 1.0, 1.0, m.trim, x, 1.45, z));
+    g.add(box(0.08, 0.8, 0.8, glass, x - side * 0.01, 1.45, z));
+    g.add(box(0.09, 0.05, 0.9, m.trim, x - side * 0.02, 1.45, z));
+    g.add(box(0.09, 0.9, 0.05, m.trim, x - side * 0.02, 1.45, z));
+    g.add(box(0.18, 0.06, 1.05, m.woodLight, x - side * 0.06, 0.93, z));
+    for (const dz of [-0.3, 0, 0.3]) ball(0.07, 0.09, 0.07, [m.pink, m.yellow, m.red][Math.round(dz * 10 / 3) + 1] ?? m.pink, x - side * 0.08, 1.02, z + dz);
+    for (const [r, k] of [[1, 0], [-1, 1]]) {
+      const shaftMat = new THREE.MeshBasicMaterial({ color: 0xfff2c0, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+      if (r < 0) continue;
+      const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.02, 2.4, 0.8), shaftMat);
+      shaft.position.set(side * (W - 0.7), 0.9, z);
+      shaft.rotation.z = side * -0.7;
+      g.add(shaft);
+      shafts.push(shaftMat);
+      void k;
+    }
+  }
+  // A lantern from the middle beam, a small one by the door, and the glow of each.
+  const hang = (x, y, z, size) => {
+    g.add(box(0.02, H - y - 0.1, 0.02, m.dark, x, (H + y) / 2 - 0.05, z));
+    g.add(box(0.18, 0.24, 0.18, barnLantern, x, y, z));
+    g.add(box(0.24, 0.04, 0.24, m.dark, x, y + 0.14, z));
+    halos.push(halo(x, y, z, size, 0.4));
+  };
+  hang(0.6, 1.95, 0.4, 2.2);
+  hang(-0.9, 1.9, 2.2, 1.4);
+  hang(-2.6, 1.95, -0.8, 1.6);
+
+  const obstacles = [
+    [-0.95, 0.95, -D, -D + 0.65],
+    [-3.55, -1.3, -1.8, 0.2],
+    [W - 1.55, W, -D, -D + 2.3],
+    [-W, -W + 0.55, 1.2, 2.6],
+    [0.75, 1.6, -D, -D + 1.0],
+    [W - 0.8, W, 0.2, D],
+    [-W, -W + 0.9, D - 0.9, D],
+    [-W, -W + 0.9, -D, -D + 0.9],
+  ];
+  const cottage = {
+    id: "cottage",
+    group: g,
+    at: COTTAGE_IN_AT,
+    start: { x: 0, z: 0.9 },
+    bounds: { x0: -(W - 0.3), x1: W - 0.3, z0: -(D - 0.25), z1: D - 0.25 },
+    obstacles,
+    doors,
+    pet: true,
+    follow: { back: 2.3, up: 1.15 },
+    title: "The cottage",
+    note: "Only you can see in here. Walk with W A S D, turn with the arrow keys or by dragging. Click your pet to stroke it.",
+    welcome: "Inside the cottage. Only you can see in here.",
+    doorHint: "Click the door to go back outside",
+    glass,
+    glassDay,
+    glassNight,
+    shafts,
+    halos,
+    flames,
+    fireGlow,
+  };
+  scene.add(g);
+  return cottage;
+})();
+cottageIn.update = (now) => {
+  cottageIn.glass.color.copy(cottageIn.glassNight).lerp(cottageIn.glassDay, dayness);
+  const sun = dayness * (1 - 0.8 * weatherNow.cloud);
+  for (const shaft of cottageIn.shafts) shaft.opacity = sun * 0.05;
+  for (const h of cottageIn.halos) h.material.opacity = 0.3 + 0.5 * skyNight;
+  const t = now / 1000;
+  // The fire dances unless you've asked for stillness.
+  const dance = stillMotion.matches ? 0 : 1;
+  cottageIn.flames.forEach((flame, i) => {
+    flame.scale.set(1 + Math.sin(t * 9 + i * 2) * 0.12 * dance, 1 + Math.sin(t * 13 + i * 3) * 0.2 * dance, 1);
+    flame.position.y = 0.22 + (flame.userData.h * flame.scale.y) / 2;
+  });
+  cottageIn.fireGlow.material.opacity = 0.45 + Math.sin(t * 11) * 0.06 * dance;
+};
+cottageIn.pick = () => {
+  const pet = petUnderPointer();
+  return pet ? { distance: pet.distance, label: `Click to stroke ${petObj.name}`, act: strokePet } : null;
+};
 
 // A cottage behind the garden, facing it: cream walls, a honey-coloured thatch with
 // scalloped eaves, a round-topped door, shutters with hearts, a crooked chimney with
@@ -7215,7 +7798,12 @@ function buildLane(points, width, seed) {
   const toWalkway = [6, -17.2];
   const laneA = [here, bend(here, toWalkway, 0.3, 1.3), bend(here, toWalkway, 0.62, -1.2), toWalkway, [6, -12.6]];
   const laneB = [bend(here, toWalkway, 0.14, 0.4), [here[0] + 5.4, here[1] + 0.6], [21.6, -17.4], [20.4, -11.6], [17.6, -7.4], [14.2, -6.1], [12.6, -6.0]];
-  const edges = [...buildLane(laneA, 1.25, 0.4), ...buildLane(laneB, 1.1, 2.2)];
+  // A lane from the barn doors out to the first one, so the barn has a way in from the garden.
+  barnGroup.updateMatrixWorld(true);
+  const barnDoor = barnGroup.localToWorld(new THREE.Vector3(0, 0, 1.9));
+  const barnStart = [barnDoor.x, barnDoor.z];
+  const laneC = [barnStart, bend(barnStart, [6, -17.2], 0.35, 0.9), bend(barnStart, [6, -17.2], 0.7, -0.7), [6, -17.0]];
+  const edges = [...buildLane(laneA, 1.25, 0.4), ...buildLane(laneB, 1.1, 2.2), ...buildLane(laneC, 1.2, 5.3)];
   const pebbles = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), flatMaterial(0xffffff), edges.length * 2);
   const dummy = new THREE.Object3D();
   const tint = new THREE.Color();
@@ -7266,6 +7854,7 @@ function buildLane(points, width, seed) {
       stone.rotation.y = seeded(n + 6) * Math.PI * 2;
       stone.position.set(p.x - t.z * off + (seeded(n + 7) - 0.5) * 0.1, GROUND_Y + 0.025 + seeded(n + 8) * 0.006, p.z + t.x * off + (seeded(n + 9) - 0.5) * 0.1);
       scene.add(stone);
+      addPetStone(stone);
     }
   }
 }
@@ -7576,7 +8165,7 @@ function animate() {
   else controls.update();
   updateBedSigns();
   updateOwnSign();
-  updateBarnSign();
+  updateRoomSigns();
   tickAnimations(now);
   updateRings(now);
   updateSky();

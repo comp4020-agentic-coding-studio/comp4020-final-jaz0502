@@ -139,7 +139,7 @@ export function renderPage(): string {
       <div class="you-actions">
         <button type="button" id="camera-button" class="journal-action" aria-label="Take a photo of the garden"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 8h3l1.6-2.2h6.8L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.2" r="3.6"/></svg><span>Camera</span></button>
         <button type="button" id="wave-button" class="journal-action" aria-label="Wave hello to everyone in the garden"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 13V6.5a1.5 1.5 0 0 1 3 0V12"/><path d="M11 11V5a1.5 1.5 0 0 1 3 0v6"/><path d="M14 11V6.5a1.5 1.5 0 0 1 3 0V14c0 4-2.6 6.5-6.2 6.5-2.6 0-4.2-1.4-5.4-3.4L3.8 14.3a1.4 1.4 0 0 1 2.3-1.5L8 15"/><path d="M19.5 4.5c.9.7 1.5 1.7 1.6 2.8"/></svg><span>Wave</span></button>
-        <button type="button" id="bag-button" class="journal-action" aria-expanded="false" aria-controls="bag" aria-label="Open your bag of seeds"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/><path d="M6.2 8h11.6l1.4 12H4.8z"/><path d="M9.5 12.5c.6.9 1.4 1.3 2.5 1.3s1.9-.4 2.5-1.3"/></svg><span>Bag</span></button>
+        <button type="button" id="bag-button" class="journal-action" aria-expanded="false" aria-controls="bag" aria-label="Open your bag of seeds"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 10a5 5 0 0 1 10 0"/><path d="M3.5 10h17"/><path d="M4.8 10l1.6 9h11.2l1.6-9"/><path d="M9.2 10l.6 9M14.8 10l-.6 9M5.6 14.5h12.8"/></svg><span>Bag</span></button>
       </div>
       <!-- In your own garden only: the seeds you can plant, as "What to plant" is in the shared garden. -->
       <div id="own-seeds" class="own-seeds">
@@ -160,7 +160,7 @@ export function renderPage(): string {
         <form id="pet-form" autocomplete="off" novalidate>
           <div id="pet-kinds" role="radiogroup" aria-label="Kind of pet"></div>
           <label class="pet-name-label" for="pet-name">Name</label>
-          <input id="pet-name" type="text" maxlength="12" inputmode="text" autocapitalize="words" spellcheck="false" placeholder="1 to 12 letters or digits" />
+          <input id="pet-name" type="text" maxlength="12" inputmode="text" autocapitalize="words" spellcheck="false" placeholder="1 to 12 letters" />
           <div class="pet-actions">
             <button type="submit" id="pet-save">Keep</button>
             <button type="button" id="pet-feed" hidden>Feed</button>
@@ -196,6 +196,10 @@ export function renderPage(): string {
   <!-- The way into the barn, floating over it like the sign over your own garden. -->
   <button type="button" id="barn-sign" class="bed-sign own-sign" aria-label="Go to the barn, and inside it, which only you can see" hidden>
     <span class="bed-sign-label">Go to the barn</span>
+  </button>
+
+  <button type="button" id="cottage-sign" class="bed-sign own-sign" aria-label="Go to the cottage, and inside it, which only you can see" hidden>
+    <span class="bed-sign-label">Go to the cottage</span>
   </button>
 
   <div id="photo-ui" hidden>
@@ -241,7 +245,7 @@ export function renderPage(): string {
   <!-- On a phone the journal starts closed, so its two actions also float in reach. -->
   <div id="quick-actions">
     <button type="button" id="quick-camera" class="quick-action" aria-label="Take a photo of the garden"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 8h3l1.6-2.2h6.8L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.2" r="3.6"/></svg></button>
-    <button type="button" id="quick-bag" class="quick-action" aria-expanded="false" aria-controls="bag" aria-label="Open your bag of seeds"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/><path d="M6.2 8h11.6l1.4 12H4.8z"/><path d="M9.5 12.5c.6.9 1.4 1.3 2.5 1.3s1.9-.4 2.5-1.3"/></svg></button>
+    <button type="button" id="quick-bag" class="quick-action" aria-expanded="false" aria-controls="bag" aria-label="Open your bag of seeds"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 10a5 5 0 0 1 10 0"/><path d="M3.5 10h17"/><path d="M4.8 10l1.6 9h11.2l1.6-9"/><path d="M9.2 10l.6 9M14.8 10l-.6 9M5.6 14.5h12.8"/></svg></button>
     <button type="button" id="quick-wave" class="quick-action" aria-label="Wave hello to everyone in the garden"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 13V6.5a1.5 1.5 0 0 1 3 0V12"/><path d="M11 11V5a1.5 1.5 0 0 1 3 0v6"/><path d="M14 11V6.5a1.5 1.5 0 0 1 3 0V14c0 4-2.6 6.5-6.2 6.5-2.6 0-4.2-1.4-5.4-3.4L3.8 14.3a1.4 1.4 0 0 1 2.3-1.5L8 15"/><path d="M19.5 4.5c.9.7 1.5 1.7 1.6 2.8"/></svg></button>
   </div>
 
@@ -257,11 +261,12 @@ export function renderPage(): string {
   <!-- Inside the barn: a private view, so the garden's panels step aside. -->
   <div id="interior-bar" class="paper" role="region" aria-label="Inside the barn" hidden>
     <div class="own-bar-head">
-      <h2 class="paper-title">The barn</h2>
+      <h2 id="interior-title" class="paper-title">The barn</h2>
       <button type="button" id="interior-back">Back outside</button>
     </div>
-    <p class="own-note">Only you can see in here. Walk with W A S D, turn with the arrow keys or by dragging, and click a cow to give it hay.</p>
+    <p id="interior-note" class="own-note">Only you can see in here. Walk with W A S D, turn with the arrow keys or by dragging, and click a cow to give it hay.</p>
   </div>
+  <button type="button" id="interior-feed" hidden>Feed my pet</button>
   <div id="interior-stick" hidden aria-hidden="true"><span id="interior-knob"></span></div>
   <div id="interior-fade" aria-hidden="true"></div>
 
