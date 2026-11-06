@@ -130,6 +130,14 @@ describe("the task for each decoration", () => {
     expect(lines.some((l) => l.includes("did=pat-hen result=refused reason=no-such-animal"))).toBe(true);
   });
 
+  it("says a watering is for another task when watering is not what you are on", async () => {
+    const alice = newVisitor(app.url);
+    await alice.post(30, "plant", { type: plantFor(30) });
+    const water = (await alice.post(30, "water")).body as unknown as { credit?: string };
+    // Alice is on feeding cows, so a watering is not what counts for her next decoration.
+    expect(water.credit).toBe("other-task");
+  });
+
   it("never tells anyone else, never puts it in Recent, and never carries the cookie", async () => {
     const alice = newVisitor(app.url);
     const bob = newVisitor(app.url);

@@ -111,6 +111,27 @@ describe("unlocking decorations by watering the shared garden", () => {
     await stream.waitFor((f) => f.event === "decorations" && (f.data as Decorations).unlocked.length === 1);
   });
 
+  it("tells whoever watered whether it counted, and nobody else", async () => {
+    const alice = newVisitor(app.url);
+    const bob = newVisitor(app.url);
+    const bobStream = await join(app, bob.gid);
+    await plantRested(alice, [6, 7], LONG_GAP);
+
+    // The first watering counts; the second, straight after, is too soon.
+    const first = (await alice.post(6, "water")).body as unknown as { credit?: string };
+    const again = (await alice.post(6, "water")).body as unknown as { credit?: string };
+    expect(first.credit).toBe("counted");
+    expect(again.credit).toBe("rested");
+    // Planting and composting say nothing about it.
+    const planted = (await alice.post(8, "plant", { type: plantFor(8) })).body as unknown as { credit?: string };
+    expect(planted.credit).toBeUndefined();
+
+    // What others hear of the watering is the plot alone, with no word of anyone's task.
+    await sleep(200);
+    expect(bobStream.raw()).not.toContain("credit");
+    expect(bobStream.raw()).not.toContain("rested");
+  });
+
   it("does not count a plant just planted, or anything in your own garden", async () => {
     const alice = newVisitor(app.url);
     const stream = await join(app, alice.gid);

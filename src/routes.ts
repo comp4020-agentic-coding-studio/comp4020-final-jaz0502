@@ -599,12 +599,16 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
 
       // Looking after the shared garden earns decorations for your own, privately. A
       // watering counts only on a rested plot; planting and composting count as they are.
+      // What a watering did for your next decoration, told to the one who did it and nobody
+      // else, so "Watered 34" and "water 5 more" don't look like they disagree.
+      const task = db.getDecorations(who).next?.do ?? null;
+      const credit = action !== "water" || task === null ? undefined : task !== "water" ? "other-task" : countsAsWatering ? "counted" : "rested";
       if (action === "water" ? countsAsWatering : true) creditTowards(who, action === "water" ? "water" : action === "plant" ? "plant" : "compost");
 
       const publicResult = toPublic(result);
       broadcastUpdate(publicResult);
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify(publicResult));
+      res.end(JSON.stringify(credit === undefined ? publicResult : { ...publicResult, credit }));
     } else {
       logEvent(who, action, { plot: position, result: "refused", reason: refusalReason(position, action) });
       res.writeHead(409, { "content-type": "application/json" });

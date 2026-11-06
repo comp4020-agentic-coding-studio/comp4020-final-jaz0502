@@ -4012,6 +4012,7 @@ async function handlePointerClick(event) {
 
 // Sends one action to the server. The garden changes only when the server's event
 // arrives, so this only has to say when something was turned away.
+let toldOtherTask = false;
 async function sendAction(position, action) {
   // The server has said to slow down: wait until it says to try again, rather than
   // sending clicks it will only turn away.
@@ -4036,6 +4037,14 @@ async function sendAction(position, action) {
         actionsPausedUntil = Date.now() + (Number.isFinite(seconds) && seconds > 0 ? seconds : 5) * 1000;
       }
       showStatusMessage(body.error ?? "That action isn't valid for this plot right now.");
+    } else if (action === "water") {
+      // Your record counts every watering; your next decoration counts a plant once, then
+      // after it has rested. Say so when this one didn't count, so the two don't look wrong.
+      if (body.credit === "rested") showStatusMessage("That plant was just watered, so it doesn't count towards your next decoration yet.");
+      else if (body.credit === "other-task" && !toldOtherTask) {
+        toldOtherTask = true;
+        showStatusMessage("Watering doesn't count towards your next decoration right now. See the task in your journal.");
+      }
     } else if (action === "gather") {
       // Gathering changes nothing in the garden, so there is no garden event to
       // show it: say what you got. Your seeds arrive on your own stream.
