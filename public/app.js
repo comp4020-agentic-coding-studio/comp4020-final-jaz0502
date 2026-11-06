@@ -1919,11 +1919,22 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.copy(CAMERA_TARGET);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
-controls.minDistance = 4;
+// A phone's screen is small, so let it zoom right in to tap a hen or a plant.
+const phoneScreen = window.matchMedia("(max-width: 700px)");
+const setZoomLimits = () => (controls.minDistance = phoneScreen.matches ? 1.4 : 4);
+setZoomLimits();
+phoneScreen.addEventListener("change", setZoomLimits);
 controls.maxDistance = 14;
 controls.maxPolarAngle = Math.PI / 2 - 0.05;
 
 const panels = document.getElementById("panels");
+// On a phone the panels are a sheet along the bottom and the round buttons ride just above
+// it, so tell the stylesheet how tall the sheet is now (it shrinks as panels are hidden).
+function keepSheetHeight() {
+  document.documentElement.style.setProperty("--sheet-height", `${Math.ceil(panels.getBoundingClientRect().height)}px`);
+}
+new ResizeObserver(keepSheetHeight).observe(panels);
+keepSheetHeight();
 const panelToggle = document.getElementById("panel-toggle");
 const panelBody = document.getElementById("panel-body");
 const gardenerToggle = document.getElementById("gardener-toggle");
@@ -6957,7 +6968,10 @@ function updateInterior(now) {
   // The camera stays behind and above you, looking at you, and never goes through a wall: if
   // the room is in the way it comes in closer.
   const behind = new THREE.Vector3(Math.sin(walker.yaw), 0, Math.cos(walker.yaw));
-  let back = room.follow.back * Math.cos(Math.max(walker.pitch, -0.3) * 0.5);
+  // On a tall, narrow screen (a phone held upright) the room is seen through a narrow slice, so
+  // the camera comes in closer or you look like a speck.
+  const tall = camera.aspect < 0.9 ? 0.62 : 1;
+  let back = room.follow.back * tall * Math.cos(Math.max(walker.pitch, -0.3) * 0.5);
   for (let k = 0; k < 12; k++) {
     const cx = walker.x + behind.x * back;
     const cz = walker.z + behind.z * back;
@@ -6967,7 +6981,7 @@ function updateInterior(now) {
     if (inside && !inFurniture) break;
     back *= 0.85;
   }
-  const lift = room.follow.up + walker.pitch * 1.2;
+  const lift = room.follow.up * (tall < 1 ? 0.82 : 1) + walker.pitch * 1.2;
   camera.position.set(room.at.x + walker.x + behind.x * back, GROUND_Y + Math.max(0.5, lift), room.at.z + walker.z + behind.z * back);
   camera.lookAt(room.at.x + walker.x, GROUND_Y + FOLLOW_LOOK, room.at.z + walker.z);
 
