@@ -2,58 +2,50 @@
 
 ## What "good" means
 
-For this app, "good" means that many people can be online at the same time, all working on the same shared garden. When someone plants something, it shows up in the garden for everyone, without a reload. You can also see that other people are there: each gardener is a small figure that walks the stone paths round the garden's four beds, and a "Who's here" list shows how many people are online. You can go from one bed to another by clicking it. Each bed has a name and a theme: The Cottage Garden grows lavender, rosemary and foxglove, The Flower Garden tulips, sunflowers and flower shrubs, The Fruit Garden apple trees, strawberries and blueberries, and The Vegetable Garden carrots, tomatoes and lettuces. A bed takes only what suits it, and each has its own fence.
+Many people can be online at the same time, working on one shared garden. When someone plants something, it shows up for everyone without a reload. You see other people as small figures, and each bed has a name and a theme. The garden goes through four seasons and changing weather. It should be just as easy to play on a phone as on a laptop.
 
-The garden is cooperative. Anyone can plant an empty plot and anyone can water any plot, so nobody owns anything. Plants that nobody waters for some time wilt, and someone has to compost a wilted plot before anything new can grow there. The garden only stays alive because people look after it. It should not have a scoring system, a ranking, or any win or lose situation. The goal is a shared, collaborative space.
+The garden is cooperative, and nobody owns anything: anyone can plant an empty plot or water any plot. Plants nobody waters wilt. The garden only stays alive because people look after it. There is no scoring or ranking. Caring for the garden is rewarded privately, by unlocking decorations for your own garden, then a pet.
 
-There are no accounts. A visitor is a cookie, so one browser is one gardener. Each gardener gets a colour, which colours their figure and a ring around each plant they watered last. The ring fades and pulses as the plant gets thirsty. What people do shows up where it happens: a small icon floats over a plot when someone plants, waters or composts it, and a short "Recent" list shows the last few actions.
+There are no accounts. A visitor is a cookie, so one browser is one gardener. What people do shows up where it happens: an icon floats over a plot, and a short "Recent" list shows the last few actions.
 
-Each gardener also has a private record of what they have planted, watered and composted. It is only a record: nobody else sees it, it is never compared between gardeners, and it has no goals or levels, so it cannot become a score.
-
-Anyone can take a photo of the garden. The camera hides everything else and shows a frame that can be moved and resized and set to a free, wide, square or portrait shape. Photos are kept in an album in that gardener's own browser, up to 24, and nobody else sees them.
+Each gardener also has a private record of their gardening history, a private album of up to 24 photos kept in their own browser, and a private garden nobody else can touch. To plant there, they gather seeds from fully grown plants in the shared garden.
 
 ## What I left out
 
-There are no names or profiles chosen by gardeners, because there are no accounts and I did not want free text from strangers. Gardeners are told apart by colour alone, so two can end up with similar colours.
+There are no names or profiles, because there are no accounts. The one exception is a pet's name, which only its owner sees. Gardeners are told apart by colour alone.
 
-There is no shared gallery of photos. It would mean taking pictures from strangers, and a gallery invites a "best photo" ranking. An album is only ever yours, and it lives in your browser, so it is gone if you clear your site data or switch device.
-
-Figures only walk along the paths and never stand on a plot. Where a figure is, or which bed you are looking at, has no effect on what anyone can do to a plot.
+There is no shared photo gallery. Where a figure stands has no effect on what anyone can do to a plot.
 
 Who is here is not remembered: after a restart nobody is listed and the Recent list starts empty. The plants and each gardener's record are kept.
 
-In the first version I left out figures and a count of who was online, because I expected live movement to cost too much server effort on one small machine. I added them later and answered that worry with limits: one move per gardener every 100 ms, messages that are checked, and a cap of 200 figures. The options I weighed are in `docs/decisions/0001-show-who-is-here.md`.
+My first version left out figures, because I expected live movement would cost too much on one small machine. I added them later with limits: one move per gardener every 100 ms, checked messages and a cap of 200 figures (`docs/decisions/0001-show-who-is-here.md`).
 
 ## What can be checked
 
 Some of "good" is checked by automated tests in `spec/`:
 
-- Only an empty plot can be planted. A user cannot plant in a spot where there is already a plant, and two people planting the same plot at the same moment cannot both succeed.
-- Anyone can water anyone's plot, and watering resets how long a plant has before it wilts.
-- The garden has four beds of 25 plots, and watering and composting work the same in each.
-- Each bed takes only its own plants. The server turns away a plant the bed does not take, whether it is sent from the page or by hand, and nothing changes. Anyone can still water or compost in any bed.
-- A wilted plot cannot be watered or replanted until someone composts it.
-- A visitor's cookie is never sent to anyone else. Other people only ever see a one-way public id, and the colours come from that id.
-- Everyone who joins is told who is already here, a gardener's move reaches the others within a second, and two tabs from one browser are one gardener. Moves are checked and limited, so invalid ones, ones from someone not connected, and ones sent too fast are refused.
-- A gardener's record counts only what succeeds, goes only to that gardener, and survives a restart.
-- Each gardener can only act on plots so often: a limited number of plants, waterings and compostings in a short time. Past it the server turns the action away and nothing changes, and it counts the same for everyone, so one person's flood never stops another.
-- The Recent list shows what others did, holds only the last few entries, and never includes a refused action.
-- The server's log names who did what, including refused actions, and never contains a cookie.
+- Only an empty plot can be planted, and two people planting the same plot at the same moment cannot both succeed.
+- Anyone can water any plot, and watering resets the wilt clock.
+- Four beds of 25 plots each take only their own plants.
+- A wilted plot cannot be watered or replanted until composted.
+- Everyone who joins is told who is here.
+- A gardener's record, decorations, seeds and pet go only to them.
+- Each gardener's actions are rate-limited: past the limit the server turns them away.
+- The Recent list holds only the last few entries.
+- The log names who did what and never contains a cookie.
 
 ## What is judged
 
 The rest can only be judged by a person:
 
-- The overall design and usability: It should be easy to work out how the garden works without reading anything, and the panels should fit on a laptop screen without scrolling.
-- Persistence: Plants must survive a restart or a redeployment, but the container in CI cannot restart in the middle of a test run, so no test can prove it. I judged it by having the agent restart the live machine on Fly and check that the planted plots were still there.
-- Real-time updates to plots: A change in one browser should appear in the others within about a second. There is no test for this, because proving that a change reaches two independent browsers needs real browsers. I judged it by watching two browsers side by side.
-- Whether it feels like other people are there: how the figures and icons look and read is a matter for a person.
-- How the beds look: each bed's fence, plants and colours are for a person to judge. Nothing about them affects what anyone can do.
-- The camera and album: Photos are taken and kept in the visitor's own browser, so the server never sees one and no test can check it. Whether the frame is easy to move and resize on a laptop and a phone, and whether the album stays private to one browser, is for a person to judge. I judged it by looking at it in my own browser, and the agent drove it in a real browser at laptop and phone widths.
-- The absence of scoring: Nothing in the app keeps score, and that is a design choice rather than something a test can show.
+- **Design and usability:** the garden should be easy to work out without reading anything.
+- **Persistence:** no test can restart the machine mid-run, so I had the agent restart the live Fly machine and check the plants were still there.
+- **Real-time updates:** a change should reach other browsers within about a second. That needs real browsers, so I watched two side by side.
+- **Camera, album, barn, cottage, animals and phone layout:** these live in the visitor's browser, so I judged them by using them.
+- **No scoring:** nothing keeps score. That is a design choice, not something a test can show.
 
 ## What I looked at
 
-- The Forest app, which I used as the visual reference for the garden: plants that grow in a small 3D scene.
-- The course's final project brief and the crit 8 page, for what this README has to cover. The brief's line that some of "good" can be checked and some can only be judged is how I organised the two sections above.
+- Forest, the focus app (https://forestapp.cc/): my visual reference for plants growing in a small 3D scene.
+- The final project brief and the crit 8 page, for what this README must cover.
 - The crit 9 page, for what to decide about several people using the app at once. My decision is in `docs/decisions/0001-show-who-is-here.md`.
