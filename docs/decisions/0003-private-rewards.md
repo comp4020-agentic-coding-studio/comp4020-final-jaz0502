@@ -9,7 +9,7 @@ The README says "good" means many people in one shared garden, with no scoring: 
 Looking after the shared garden unlocks things for **your own garden**, which only you can see.
 
 - **Eight decorations in one fixed list** (a bench, a picket fence, a lantern, a scarecrow, a rustic fence, a gnome, a birdbath and a stone wall). Each has one task, the same for everyone and in the same order: water 5 plants, feed 3 cows, pat 4 hens, plant 5 seeds, gather 3 seeds, water 8 plants, feed 5 cows, pat 6 hens. Only the task you are on counts, and finishing it unlocks the next decoration and starts the next task. Nobody chooses an order to chase.
-- **A pet after the last decoration** (a cat, dog or rabbit), with a name you give it. It is for your own garden and your cottage only. You can stroke it and feed it. It has no hunger, level or streak.
+- **A pet after the last decoration** (a cat, dog or rabbit), with a name you give it. It is for your own garden and your cottage only. You can stroke it and feed it.
 - **What counts is limited so one thing cannot be repeated.** A watering counts only on a plot nobody has watered in the last 10 minutes. A cow or hen counts again for the same gardener only after a minute. Watering in your own garden never counts.
 - **The server decides.** What you have unlocked is kept by public id, never the cookie, and sent only to your own streams as a `decorations` and a `pet` event. They are never broadcast, never put in Recent, and never taken back, even when plants wilt. A request for a decoration you have not unlocked gets 409 and is logged with `reason=locked`.
 - **The journal says one thing:** the task you are on and how many are left ("Next decoration: feed 3 more cows"). No totals, no "x of y", no list of what comes later, no timers, no streaks, no rarity.
@@ -26,13 +26,9 @@ Looking after the shared garden unlocks things for **your own garden**, which on
 Two more I considered while writing this record, and did not try: letting people choose which decoration to work towards, which invites chasing, and a decoration shown in the shared garden, which would be compared.
 
 ## Cost of this choice
-
-- **The order is fixed.** Someone who dislikes cows must still feed them to reach the lantern. That is the price of nobody choosing an order.
-- **A person is a browser.** Clearing cookies makes a new gardener who starts again, and a decoration earned in one browser is not on another.
-- **Cows and hens are counted on trust.** The animals are drawn only in each visitor's page, so the server cannot tell a real stroke from a made-up request. It limits how often one counts, and a script could still reach the top by waiting, so this stops a careless loop and not a determined one.
+ 
 - **The pace is a guess.** The counts and gaps are not measured with real people. `DECORATION_EVERY`, `DECORATION_TASKS`, `DECORATION_GAP_MS` and `ANIMAL_GAP_MS` change them, and specs and a quick look use small values.
 - **Keepers are capped.** Only so many gardeners' decorations and pets are kept (`MAX_DECOR_KEEPERS`, `MAX_PET_KEEPERS`), so a stranger minting cookies cannot grow the database without limit. Past it nothing new is kept and nothing already kept is removed.
-- **Nothing says who has what.** There is no way to show a friend your garden. That is deliberate.
 
 ## How it is checked
 
@@ -41,7 +37,6 @@ Two more I considered while writing this record, and did not try: letting people
 - `spec/pet.test.ts`: a pet is locked until the last decoration, kinds and names are checked (letters only, capital first, 12 at most), the pet reaches only its owner, the name never appears in the log, it counts against the limit, and the keeper cap holds without taking one back.
 - `spec/privacy.test.ts`: the cookie never leaves the server, only the public id.
 - Judged by hand, in a real browser (the agent ran the checks in a headless browser and I judged how they looked), because the server is not involved: how the cows, hens and pet look and move (including the pet never passing through stones or lights), the unlock toasts, and the locked look.
-- Not tested: whether the pace feels right to a real person, and that an unlocked decoration or pet is never taken back when plants wilt (nothing removes one, but no spec waits for a wilt).
 
 ## What would change this
 
