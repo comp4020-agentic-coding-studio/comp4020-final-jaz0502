@@ -49,5 +49,4 @@ The rest can only be judged by a person:
 ## What I looked at
 
 - Forest, the focus app (https://forestapp.cc/): my visual reference for plants growing in a small 3D scene.
-- The final project brief and the crit 8 page, for what this README must cover.
 - The crit 9 page, for several people using the app at once (`docs/decisions/0001-show-who-is-here.md`).
