@@ -6,7 +6,7 @@ The README says "good" means that several people can be online at once, working 
 
 ## Decision
 
-Each gardener is a small figure in their own colour, and the colour comes from their public id. Figures walk only along the flagstone path round the bed. The server is told where a figure is and where it is walking to, not every step, and the browser animates in between. A "Who's here" list in the side panel shows one dot per gardener, and a short "Recent" list shows the last three actions. A "You" panel gives each gardener a private record of what they have planted, watered and composted. Gardeners can also wave to each other. A figure is only for show, so where it stands never limits what anyone can do to a plot.
+Each gardener is a small figure in their own colour, and the colour comes from their public id. Figures walk only along the path around the bed. The server is told where a figure is and where it is walking to, not every step, and the browser animates in between. A "Who's here" list in the side panel shows one dot per gardener, and a short "Recent" list shows the last three actions. A "You" panel gives each gardener a private record of what they have planted, watered and composted. Gardeners can also wave to each other. A figure is only for show.
 
 ## Options considered
 
