@@ -26,7 +26,7 @@ Two more I considered while writing this record, and did not try: opening the bu
 ## Cost of this choice
 
 - **No spec can check it.** The server is not involved, so how it looks and feels is judged in a real browser, and the README lists it as judged.
-- **Walking by hand takes care.** At first setting off looked like a slide, so the agent made speed ease up and down, and the camera comes in close in a corner. The phone stick was not tested at all.
+- **Walking by hand takes care.** At first setting off looked like a slide, so the agent made speed ease up and down, and the camera comes in close in a corner. The phone stick was not tried on a real phone: the agent tested it in a phone-sized headless browser with touch input, where pushing it walked you forward and dragging turned the view, and the camera was brought in closer on a tall, narrow screen.
 - **More to draw.** The rooms are built once and hidden when you are outside, but each adds objects for the visitor's browser to draw while you are in it. I did not measure this, so a weak phone may be slow.
 - **The rooms and the buildings can drift apart.** I asked for the two windows by the cottage door so the inside would match the outside, and the agent built them to match. Nobody compared them side by side, and nothing keeps the two the same.
 - **Your pet is not shared.** A friend cannot see it in your cottage.

@@ -8,7 +8,7 @@ I had the agent turn the list into a step-by-step plan for the first prototype, 
 
 I kept the first prototype to one shared bed anyone could plant, water and compost, then added larger features one at a time: themed beds, where I chose what each bed holds ([`76ad736`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/76ad736), [`e82676e`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/e82676e), [`321cb8a`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/321cb8a), [`411730c`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/411730c)), a private garden grown from gathered seeds ([`3c005e9`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/3c005e9)), and a barn and cottage you can walk into ([`2327afe`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/2327afe), [`67e4f46`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/67e4f46)).
 
-I chose mouse and touch control over the keyboard so it works on more devices. The calls that shaped the result were mine:
+In the garden I chose mouse and touch control over the keyboard so it works on more devices. The calls that shaped the result were mine:
 
 - Figures walk only on the paths round the beds, never on the plots ([`c7d5e8c`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/c7d5e8c)).
 - A separate panel for the gardener, with a private record of what they have planted, watered and composted ([`445666e`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/445666e)). The agent pointed out that this sits close to my "no scoring" rule, so the guardrails went into `CLAUDE.md` first.
@@ -33,7 +33,7 @@ I checked each new feature in more than one way:
 
 - **Specs.** Each new server rule has a spec in `spec/`.
 - **Breaking the rule on purpose.** The agent made the code break a rule, confirmed the spec failed, then restored it.
-- **Real browsers.** The agent drove two separate visitors in a real browser to check that one person's actions appear for the other without a reload, and I looked at every visual change in my own browser before approving it. Before each push, the agent ran `pnpm check` against the Docker image.
+- **Real browsers.** The agent drove two separate visitors in a real browser to check that one person's actions appear for the other without a reload, and I looked at every visual change in my own browser before approving it. Before pushing, the agent ran `pnpm check` against the Docker image.
 
 I judged by hand what can't be tested, like usability, which is how I found buttons that were hard to notice.
 

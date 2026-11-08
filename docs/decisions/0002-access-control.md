@@ -19,6 +19,7 @@ What each person may **change**, all decided by the server from the plot's store
 - Nobody owns a plot. Anyone may water anyone's plot. That is the point of the garden, and it is a rule, not an oversight.
 - Plant in a bed only what it takes: each of the four beds has a theme, and the server turns away any other plant (409). Only planting is limited this way, so anyone may still water or compost in any bed.
 - Act on plots only so often: a budget of 15 plants, waterings and compostings in any 10 seconds, counted per person on the server, with refused attempts counted too. Past it the server answers 429 with `Retry-After` and changes nothing.
+- Plant only so much: at most 8 plantings in any rolling hour, and at most 5 of those in one bed, counted per person on the server. Only plantings that succeeded count. Past it the server answers 409, says roughly how long to wait (or to try another bed), and changes nothing. This was added after the final crit, where a few classmates filled whole beds even with the budget above: the budget stops a flood, not one person slowly taking over a bed. Your own garden is not limited this way.
 - Move their own figure and wave. Both are validated and rate-limited, and a gardener must have the event stream open to do either.
 
 What is logged: every plant, water, compost and wave, including refused ones with the reason, and every arrival and departure, each with the public id. Never the cookie. A flood past the limit is logged once for the window, so it cannot flood the log.
@@ -42,7 +43,8 @@ For how often someone may act on plots, three options:
 - **The cookie is unsigned.** The server trusts whatever `gid` it is sent. The cookie is random and never leaves the server, so nobody can guess or learn someone else's, but anyone who could read a person's cookie from their own machine could act as them. Signing it would stop a made-up cookie but not a stolen one. It is also not marked `Secure`, although the deployment forces HTTPS.
 - **A person is a browser, not a human.** Clearing cookies or opening a private window makes a new gardener, and their record starts again. Two browsers of one human are two gardeners.
 - **The limit is per cookie.** Someone who mints a fresh cookie for every request gets a fresh budget each time, so it stops a careless loop and not a determined one. Stopping that would need a limit by address as well, which would punish a whole classroom behind one connection.
-- **The numbers are a guess.** 15 in 10 seconds is more than a person clicks, but it is not measured. Each is one setting (`ACTION_LIMIT`, `ACTION_WINDOW_MS`).
+- **The numbers are a guess.** 15 in 10 seconds is more than a person clicks, and 8 plantings an hour (5 in one bed) left room for others in one playtest, but neither is measured. Each is one setting (`ACTION_LIMIT`, `ACTION_WINDOW_MS`, `PLANT_LIMIT`, `PLANT_BED_LIMIT`, `PLANT_WINDOW_MS`).
+- **Someone who just wants to plant has to wait.** After 8 plantings they can still water and compost, but must wait for the hour to roll on before planting again.
 - **The page only helps.** After a 429 the page waits for `Retry-After` instead of sending clicks, but a few requests already on their way still get through and show as errors in the browser's console. Only the server's limit counts.
 - **Figures are capped at 200, records and the limiter's table at 5,000 gardeners,** so a stranger minting cookies cannot grow memory or the database without limit. Past the cap newcomers are not shown or counted, though they can still act.
 - **A public id is short.** Eight hex digits is enough to tell a pod apart and to colour a figure. It is not meant to be secret.
@@ -52,6 +54,7 @@ For how often someone may act on plots, three options:
 - `spec/privacy.test.ts`: the cookie never reaches another visitor, only the public id, and the public id is stable per person and differs between people.
 - `spec/plots.test.ts`: only an empty plot can be planted, a wilted plot cannot be watered, composting needs a wilted plot, two simultaneous plants cannot both win.
 - `spec/limits.test.ts`: a person can act up to the budget and no further, the 429 changes nothing and says when to try again, refused attempts count, the budget comes back after the window, and one person's flood never stops another.
+- `spec/plant-limit.test.ts`: a person can plant up to 8 an hour and 5 in one bed and no more, a refused planting costs nothing, one person's planting never stops another's, the allowance comes back as the hour rolls on, watering and your own garden are not held back, and each refusal is logged with `reason=plant-limit` or `reason=bed-limit`.
 - `spec/beds.test.ts`: each bed takes its own plants and turns the others away at both ends of the bed and by hand, the refusal is logged without the cookie and counts against the limit, and the page is told each bed's name and theme.
 - `spec/stats.test.ts`: your record goes to you and nobody else.
 - `spec/presence.test.ts` and `spec/wave.test.ts`: moves and waves are validated and rate-limited, and refused from someone not connected.
