@@ -2001,3 +2001,64 @@ body.photo-mode #interior-feed {
     bottom: 150px;
   }
 }
+
+/* A phone held sideways is wide but short: the panels keep to the left column, but in the
+   same compact form as on an upright phone, and the hint moves to the right of them so it
+   never covers them. */
+@media (min-width: 701px) and (max-height: 500px) {
+  #panels {
+    top: 8px;
+    left: 8px;
+    width: 260px;
+    max-height: calc(100vh - 16px);
+    gap: 6px;
+  }
+
+  .panel {
+    padding: 0.5rem 0.8rem;
+  }
+
+  #panel .panel-body {
+    margin-top: 0.3rem;
+  }
+
+  .paper .bed-here {
+    margin-bottom: 0.25rem;
+    font-size: 1.15rem;
+  }
+
+  .paper .panel-label {
+    margin-bottom: 0.1rem;
+    font-size: 1.1rem;
+  }
+
+  #plant-picker {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+
+  #plant-picker .panel-label {
+    flex-basis: 100%;
+  }
+
+  .paper #plant-picker button {
+    padding: 0.1rem 0.55rem;
+    font-size: 1.05rem;
+  }
+
+  .panel .paper-title,
+  .panel h1.paper-title,
+  #feed-panel h2.paper-title {
+    font-size: 1.35rem;
+  }
+
+  .panel-footer {
+    margin-top: 0.3rem;
+  }
+
+  #status-bar {
+    left: calc(276px + (100vw - 276px - 88px) / 2);
+    max-width: calc(100vw - 276px - 104px);
+  }
+}
