@@ -2,7 +2,7 @@
 
 ## How I directed the agent, and how I got from the brief to the harness
 
-I directed the agent by first writing a detailed list of the features I wanted, including how a user would interact with each. I first thought of a shared art gallery, but in a gallery people could destroy each other's artworks, whereas in a garden anyone can help but nobody can overwrite someone else's healthy plant.
+I directed the agent by first writing a detailed list of the features I wanted. I first thought of a shared art gallery, but in a gallery people could destroy each other's artworks, whereas in a garden anyone can help but nobody can overwrite someone else's healthy plant.
 
 I had the agent turn the list into a step-by-step plan for the first prototype, and I reviewed and approved the plan before any code was written. The agent built it one milestone at a time, and I approved each step before it moved on, so the history has one commit per working step, such as live updates ([`8a69c4c`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/8a69c4c)) and then persistence ([`51f617b`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/51f617b)).
 
@@ -21,7 +21,7 @@ The README's list of what can be checked became the specs in `spec/`. The plant,
 
 `CLAUDE.md` holds the rules I hold the agent to ([`64cbb6e`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/64cbb6e)), and each new rule is written in the same step as the feature it protects: figures stay off the plots and their position limits nothing ([`917c852`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/917c852)), a gardener's record stays private ([`6c6509e`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/6c6509e)), and the Recent list stays a short glance with no counts ([`6987ec7`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/6987ec7)).
 
-The server decides what each person may change: planting only on an empty plot, composting only on a wilted one, only a bed's own plants in that bed, and at most 15 actions in 10 seconds ([`76ad736`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/76ad736), [`048d57b`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/048d57b)). The reasons are in [`docs/decisions/0002-access-control.md`](docs/decisions/0002-access-control.md). Every action, refusal, join and leave is logged with the public id and never the cookie ([`277b47a`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/277b47a)), so `flyctl logs` shows who did what.
+The server decides what each person may change: planting only on an empty plot, composting only on a wilted one, only a bed's own plants in that bed, and at most 15 actions in 10 seconds ([`76ad736`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/76ad736), [`048d57b`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/048d57b)). The reasons are in [`docs/decisions/0002-access-control.md`](docs/decisions/0002-access-control.md). Every action, refusal, join and leave is logged with the public id and never the cookie ([`277b47a`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/277b47a)).
 
 ## How I grounded the work
 
@@ -35,13 +35,13 @@ I checked each new feature in more than one way:
 - **Breaking the rule on purpose.** The agent made the code break a rule, confirmed the spec failed, then restored it.
 - **Real browsers.** The agent drove two separate visitors in a real browser to check that one person's actions appear for the other without a reload, and I looked at every visual change in my own browser before approving it. Before pushing, the agent ran `pnpm check` against the Docker image.
 
-I judged by hand what can't be tested, like usability, which is how I found buttons that were hard to notice.
+I judged usability by hand, which is how I found buttons that were hard to notice.
 
 ## Why this stack
 
 The agent proposed the stack and I approved it. It is plain Node with no framework, since the app has only a handful of routes. For live updates I used Server-Sent Events instead of WebSockets. Every update goes from server to browsers, so SSE needs no dependency, and the browser reconnects by itself, which suits Fly stopping idle machines. The cost is that actions travel separately as POST requests ([`8a69c4c`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/8a69c4c)).
 
-State lives in SQLite on the Fly volume. I used Node's built-in `node:sqlite` rather than `better-sqlite3`, so the Docker image has no native addon. The cost is that `node:sqlite` is still only a release candidate ([`51f617b`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/51f617b)). TypeScript runs directly on Node 24 with no build step ([`716ad0c`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/716ad0c)). Three.js is served from the repo, not a CDN, so a live demo does not depend on a third party. I had the agent restart the live Fly machine and confirm that the plants survived.
+State lives in SQLite on the Fly volume. I used Node's built-in `node:sqlite` rather than `better-sqlite3`, so the Docker image has no native addon. The cost is that `node:sqlite` is still only a release candidate ([`51f617b`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/51f617b)). TypeScript runs directly on Node 24 with no build step ([`716ad0c`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-jaz0502/commit/716ad0c)). Three.js is served from the repo, not a CDN, so a live demo does not depend on a third party.
 
 ## What I got wrong and corrected
 
