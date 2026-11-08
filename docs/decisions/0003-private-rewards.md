@@ -26,7 +26,7 @@ Looking after the shared garden unlocks things for **your own garden**, which on
 Two more I considered while writing this record, and did not try: letting people choose which decoration to work towards, which invites chasing, and a decoration shown in the shared garden, which would be compared.
 
 ## Cost of this choice
- 
+
 - **The pace is a guess.** The counts and gaps are not measured with real people. `DECORATION_EVERY`, `DECORATION_TASKS`, `DECORATION_GAP_MS` and `ANIMAL_GAP_MS` change them, and specs and a quick look use small values.
 - **Keepers are capped.** Only so many gardeners' decorations and pets are kept (`MAX_DECOR_KEEPERS`, `MAX_PET_KEEPERS`), so a stranger minting cookies cannot grow the database without limit. Past it nothing new is kept and nothing already kept is removed.
 
